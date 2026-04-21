@@ -267,7 +267,7 @@ struct WaylandApp {
     EGLSurface     egl_surface = EGL_NO_SURFACE;
     EGLConfig      egl_config  = nullptr;
 
-    int min_width  = 480;
+    int min_width  = 400;
     int min_height = 560;
 
     int width          = 520;
@@ -1131,7 +1131,7 @@ int run_x11() {
     // Min size hints
     XSizeHints hints{};
     hints.flags = PMinSize;
-    hints.min_width = 480;
+    hints.min_width = 400;
     hints.min_height = 560;
     XSetWMNormalHints(dpy, win, &hints);
 
