@@ -60,10 +60,22 @@ bool FontManager::Init(int sizePx) {
 
     hbFont_ = hb_ft_font_create_referenced(ftFace_);
 
+    currentSizePx_ = sizePx;
     ascent_ = ftFace_->size->metrics.ascender / 64.0f;
     lineHeight_ = ftFace_->size->metrics.height / 64.0f;
 
     atlasData_.resize(atlasW_ * atlasH_, 0);
+    return true;
+}
+
+bool FontManager::SetSize(int sizePx) {
+    if (!ftFace_ || sizePx == currentSizePx_) return true;
+    FT_Set_Pixel_Sizes(ftFace_, 0, sizePx);
+    currentSizePx_ = sizePx;
+    ascent_ = ftFace_->size->metrics.ascender / 64.0f;
+    lineHeight_ = ftFace_->size->metrics.height / 64.0f;
+    // Do NOT clear atlas or cache — old glyphs remain valid,
+    // new size gets fresh cache entries via the size-inclusive key.
     return true;
 }
 

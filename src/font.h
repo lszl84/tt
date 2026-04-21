@@ -33,6 +33,7 @@ public:
     ~FontManager();
 
     bool Init(int sizePx = 18);
+    bool SetSize(int sizePx);
 
     ShapedRun Shape(const std::string& text) const;
     float MeasureWidth(const std::string& text) const;
@@ -40,6 +41,8 @@ public:
     float Ascent() const { return ascent_; }
 
     const GlyphInfo& EnsureGlyph(uint32_t glyphId, int faceIdx) const;
+
+    int CurrentSize() const { return currentSizePx_; }
 
     const uint8_t* AtlasData() const { return atlasData_.data(); }
     int AtlasWidth() const { return atlasW_; }
@@ -51,6 +54,7 @@ private:
     FT_Face ftFace_ = nullptr;
     hb_font_t* hbFont_ = nullptr;
     int faceIdx_ = 0;
+    int currentSizePx_ = 18;
     float lineHeight_ = 0, ascent_ = 0;
 
     int atlasW_ = 2048, atlasH_ = 2048;
@@ -66,7 +70,7 @@ private:
     };
     mutable std::vector<CacheSlot> cache_{CACHE_SIZE};
 
-    uint64_t Key(uint32_t glyph, int face) const { return ((uint64_t)face << 32) | glyph; }
+    uint64_t Key(uint32_t glyph, int face) const { return ((uint64_t)currentSizePx_ << 40) | ((uint64_t)face << 32) | glyph; }
 
     std::string FindFont(const char* family) const;
 };
