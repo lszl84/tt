@@ -265,6 +265,12 @@ void App::Paint() {
 
     renderer.DrawText("Today's Summary", P + 14, headerTextY, ACCENT);
 
+    if (summaryHeaderHovered) {
+        std::string hint = summaryExpanded ? "(click to collapse)" : "(click to expand)";
+        float titleW = renderer.MeasureText("Today's Summary");
+        renderer.DrawText(hint, P + 14 + titleW + 12, headerTextY, Color(0.35f, 0.38f, 0.45f, 1.0f));
+    }
+
     float sumTextY = summaryY + headerH;
 
     // Compute total
