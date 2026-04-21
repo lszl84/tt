@@ -269,9 +269,9 @@ void App::Paint() {
         std::string hint = summaryExpanded ? "(click to collapse)" : "(click to expand)";
         float titleW = renderer.MeasureText("Today's Summary");
         float hintX = P + 14 + titleW + 12;
-        float baseAsc = AscH();
+        float centerY = headerTextY + LineH() * 0.5f - AscH();
         fontManager.SetSize(14 * scale);
-        float hintY = headerTextY + baseAsc - AscH();
+        float hintY = centerY - (fontManager.LineHeight() / scale) * 0.5f + (fontManager.Ascent() / scale);
         renderer.DrawText(hint, hintX, hintY, Color(0.35f, 0.38f, 0.45f, 1.0f));
         fontManager.SetSize(18 * scale);
     }
