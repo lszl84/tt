@@ -253,7 +253,6 @@ void App::Paint() {
     int shown = 0;
     for (int i = 0; i < (int)tasks.size(); i++) {
         double t = GetTaskTime(i);
-        if (t < 0.5) continue;
         float textY2 = sumTextY + (LineH() + 4) * shown;
         if (textY2 + LineH() > summaryY + summaryH - 4) break;
 
