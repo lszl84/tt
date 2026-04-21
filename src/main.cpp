@@ -271,7 +271,7 @@ struct WaylandApp {
     int min_height = 300;
 
     int width          = 720;
-    int height         = 560;
+    int height         = 900;
     int pending_width  = 0;
     int pending_height = 0;
 
@@ -864,7 +864,14 @@ void keyboard_key(void* data, wl_keyboard*, uint32_t, uint32_t, uint32_t key, ui
     case XKB_KEY_Up: keycode = 0xFF52; break;
     case XKB_KEY_Down: keycode = 0xFF54; break;
     }
-    if (keycode) g_app.OnKey(keycode, 0);
+    if (keycode) {
+        g_app.OnKey(keycode, 0);
+    } else if (app.xkb_st) {
+        uint32_t cp = xkb_state_key_get_utf32(app.xkb_st, key + 8);
+        if (cp != 0 && cp != 0x08 && cp != 0x0D && cp != 0x1B && cp != 0x09) {
+            g_app.OnChar(cp);
+        }
+    }
 }
 
 void keyboard_modifiers(void* data, wl_keyboard*, uint32_t, uint32_t mods_depressed,
@@ -1115,7 +1122,7 @@ int run_x11() {
     swa.event_mask = StructureNotifyMask | ExposureMask | ButtonPressMask | ButtonReleaseMask |
                      PointerMotionMask | KeyPressMask | KeyReleaseMask;
 
-    int width = 720, height = 560;
+    int width = 720, height = 900;
     Window win = XCreateWindow(dpy, RootWindow(dpy, screen), 0, 0, width, height, 0,
                                vi->depth, InputOutput, vi->visual, CWColormap | CWEventMask, &swa);
     XFree(vi);
@@ -1212,11 +1219,18 @@ int run_x11() {
                 case XK_Tab: keycode = 0x09; break;
                 }
                 if (keycode) g_app.OnKey(keycode, 0);
-                // Character input
+                // Character input (decode UTF-8 from XLookupString)
                 char buf[32]; int len = XLookupString(&ev.xkey, buf, sizeof(buf), nullptr, nullptr);
-                for (int i = 0; i < len; i++) {
-                    unsigned char c = (unsigned char)buf[i];
-                    if (c >= 0x20 && c < 0x7F) g_app.OnChar(c);
+                for (int i = 0; i < len; ) {
+                    unsigned char c0 = (unsigned char)buf[i];
+                    uint32_t cp = 0; int n = 0;
+                    if ((c0 & 0x80) == 0) { cp = c0; n = 1; }
+                    else if ((c0 & 0xE0) == 0xC0 && i + 1 < len) { cp = (c0 & 0x1F) << 6 | ((unsigned char)buf[i+1] & 0x3F); n = 2; }
+                    else if ((c0 & 0xF0) == 0xE0 && i + 2 < len) { cp = (c0 & 0x0F) << 12 | ((unsigned char)buf[i+1] & 0x3F) << 6 | ((unsigned char)buf[i+2] & 0x3F); n = 3; }
+                    else if ((c0 & 0xF8) == 0xF0 && i + 3 < len) { cp = (c0 & 0x07) << 18 | ((unsigned char)buf[i+1] & 0x3F) << 12 | ((unsigned char)buf[i+2] & 0x3F) << 6 | ((unsigned char)buf[i+3] & 0x3F); n = 4; }
+                    else { i++; continue; }
+                    if (cp >= 0x20 && cp != 0x7F) g_app.OnChar(cp);
+                    i += n;
                 }
                 break;
             }
@@ -1283,7 +1297,10 @@ int main() {
 #ifdef HAVE_WAYLAND
     if (std::getenv("WAYLAND_DISPLAY")) {
         int rc = run_wayland();
-        if (rc >= 0) return rc;
+        if (rc >= 0) {
+            g_app.Save();
+            return rc;
+        }
         std::fprintf(stderr, "Wayland session detected but backend failed\n");
         return 1;
     }
@@ -1291,7 +1308,10 @@ int main() {
 #ifdef HAVE_X11
     {
         int rc = run_x11();
-        if (rc >= 0) return rc;
+        if (rc >= 0) {
+            g_app.Save();
+            return rc;
+        }
     }
     std::fprintf(stderr, "X11 not available\n");
 #endif

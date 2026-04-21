@@ -1,4 +1,5 @@
 #include "app.h"
+#include "data.h"
 #include <algorithm>
 #include <ctime>
 #include <cstdio>
@@ -16,12 +17,20 @@ void App::Init() {
     }
     glReady = true;
 
-    // Some default tasks
-    tasks.push_back({"Development", false, {}, 0});
-    tasks.push_back({"Code Review", false, {}, 0});
-    tasks.push_back({"Meetings", false, {}, 0});
-    tasks.push_back({"Planning", false, {}, 0});
-    if (!tasks.empty()) selectedTask = 0;
+    if (!LoadState(*this)) {
+        // Fallback defaults
+        tasks.push_back({"Development", false, {}, 0});
+        tasks.push_back({"Code Review", false, {}, 0});
+        tasks.push_back({"Meetings", false, {}, 0});
+        tasks.push_back({"Planning", false, {}, 0});
+    }
+    if (!tasks.empty() && selectedTask < 0) selectedTask = 0;
+}
+
+void App::Save() {
+    if (!SaveState(*this)) {
+        std::fprintf(stderr, "Failed to save state\n");
+    }
 }
 
 std::string App::FormatTime(double seconds) const {
@@ -80,6 +89,14 @@ void App::ToggleTimer() {
 
 void App::Paint() {
     if (!glReady) return;
+
+    // Auto-save every 30 seconds
+    auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::seconds>(now - lastSaveTime).count() >= 30) {
+        Save();
+        lastSaveTime = now;
+    }
+
     CheckFontScale();
     renderer.BeginFrame(bufW, bufH, winW, winH, fontManager);
 
@@ -173,18 +190,6 @@ void App::Paint() {
         renderer.DrawText(timeStr, rowX + rowW - timeW - 12, textY,
                           tasks[i].active ? GREEN : TEXT_DIM);
 
-        // Active indicator dot
-        if (tasks[i].active) {
-            float dotR = 4.0f;
-            float dotX = rowX + rowW - timeW - 24;
-            float dotY = rowY + (ROW_HEIGHT - 4) / 2.0f;
-            // Pulsing
-            auto now = std::chrono::steady_clock::now();
-            float pulse = 0.7f + 0.3f * std::sin(std::chrono::duration<float>(now.time_since_epoch()).count() * 3.0f);
-            Color dotColor = {GREEN.r * pulse, GREEN.g * pulse, GREEN.b * pulse, 1.0f};
-            renderer.DrawRect(dotX - dotR, dotY - dotR, dotR*2, dotR*2, dotColor);
-        }
-
         rowY += ROW_HEIGHT;
     }
     renderer.PopClip();
@@ -197,13 +202,31 @@ void App::Paint() {
     bool canToggle = (selectedTask >= 0 && selectedTask < (int)tasks.size());
     bool isRunning = canToggle && tasks[selectedTask].active;
     Color startBtnColor = isRunning ? RED : GREEN;
-    std::string startLabel = isRunning ? "■  Stop" : "▶  Start";
+    std::string startLabel = isRunning ? "Stop" : "Start";
 
     renderer.DrawRoundedRect(startBtnX, btnAreaY, startBtnW, BUTTON_HEIGHT, 6.0f, startBtnColor);
     {
         float textW = renderer.MeasureText(startLabel);
         float textY = btnAreaY + (BUTTON_HEIGHT - LineH()) / 2.0f;
-        renderer.DrawText(startLabel, startBtnX + (startBtnW - textW) / 2, textY, Color(1,1,1,1));
+        float iconW = isRunning ? 12.0f : 14.0f;
+        float iconH = 12.0f;
+        float spacing = 8.0f;
+        float totalW = iconW + spacing + textW;
+        float contentX = startBtnX + (startBtnW - totalW) / 2.0f;
+
+        if (isRunning) {
+            // Stop: white square
+            float ix = contentX + (iconW - 10.0f) / 2.0f;
+            float iy = btnAreaY + (BUTTON_HEIGHT - 10.0f) / 2.0f;
+            renderer.DrawRect(ix, iy, 10.0f, 10.0f, Color(1,1,1,1));
+        } else {
+            // Play: white triangle pointing right
+            float ix = contentX;
+            float iy = btnAreaY + (BUTTON_HEIGHT - iconH) / 2.0f;
+            renderer.DrawTriangle(ix, iy, ix, iy + iconH, ix + iconW, iy + iconH / 2.0f, Color(1,1,1,1));
+        }
+
+        renderer.DrawText(startLabel, contentX + iconW + spacing, textY, Color(1,1,1,1));
     }
 
     // ---- Daily Summary Panel ----
@@ -225,13 +248,13 @@ void App::Paint() {
     renderer.DrawText("Total: " + FormatTime(totalSec), P + 14, sumTextY, TEXT_COLOR);
     sumTextY += LineH() + 2;
 
-    // Per-task breakdown (compact)
+    // Per-task breakdown
     renderer.PushClip(P + 2, sumTextY, W - 2*P - 4, summaryY + summaryH - sumTextY - 4);
-    float barMaxW = W - 2*P - 140;
+    int shown = 0;
     for (int i = 0; i < (int)tasks.size(); i++) {
         double t = GetTaskTime(i);
         if (t < 0.5) continue;
-        float textY2 = sumTextY + (LineH() + 4) * (i > 0 ? 1 : 0);
+        float textY2 = sumTextY + (LineH() + 4) * shown;
         if (textY2 + LineH() > summaryY + summaryH - 4) break;
 
         // Name
@@ -241,16 +264,7 @@ void App::Paint() {
         float tw = renderer.MeasureText(ts);
         renderer.DrawText(ts, W - P - 14 - tw, textY2, TEXT_DIM);
 
-        // Mini bar
-        float barX = P + 120;
-        float barW = barMaxW - 120;
-        float ratio = (totalSec > 0) ? (float)(t / totalSec) : 0;
-        renderer.DrawRect(barX, textY2 + 4, barW, 10, Color(0.12f, 0.13f, 0.16f, 1.0f));
-        if (ratio > 0)
-            renderer.DrawRect(barX, textY2 + 4, barW * ratio, 10,
-                              tasks[i].active ? GREEN : ACCENT);
-
-        sumTextY = textY2;
+        shown++;
     }
     renderer.PopClip();
 

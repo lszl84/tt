@@ -41,6 +41,9 @@ struct App {
     int selectedTask = -1; // which task is selected in the list
     int activeTask = -1;   // which task is currently tracking
 
+    // Auto-save
+    std::chrono::steady_clock::time_point lastSaveTime = std::chrono::steady_clock::now();
+
     // UI layout constants
     static constexpr float PADDING = 16.0f;
     static constexpr float ROW_HEIGHT = 40.0f;
@@ -75,6 +78,7 @@ struct App {
     void AddTask(const std::string& name);
     double GetTaskTime(int idx) const;
     std::string FormatTime(double seconds) const;
+    void Save();
 
     // Logical-pixel font metrics (divide physical by scale)
     float LineH() const { return fontManager.LineHeight() / scale; }

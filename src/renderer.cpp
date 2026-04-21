@@ -193,6 +193,15 @@ void Renderer::DrawRect(float x, float y, float w, float h, const Color& c) {
     PushQuad(x, y, x+w, y+h, 0,0,0,0, c, 0.0f);
 }
 
+void Renderer::DrawTriangle(float x1, float y1, float x2, float y2, float x3, float y3, const Color& c) {
+    Vertex v{};
+    v.r = c.r; v.g = c.g; v.b = c.b; v.a = c.a;
+    v.useTex = 0.0f;
+    v.x = x1; v.y = y1; batch_.push_back(v);
+    v.x = x2; v.y = y2; batch_.push_back(v);
+    v.x = x3; v.y = y3; batch_.push_back(v);
+}
+
 void Renderer::DrawRoundedRect(float x, float y, float w, float h, float radius, const Color& c) {
     if (radius < 0.5f) { DrawRect(x, y, w, h, c); return; }
     Vertex v{};

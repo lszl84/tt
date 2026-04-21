@@ -5,6 +5,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(FetchContent)
+FetchContent_Declare(
+    json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(json)
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GL  REQUIRED IMPORTED_TARGET gl)
 pkg_check_modules(EGL REQUIRED IMPORTED_TARGET egl)
@@ -35,6 +44,19 @@ if(WAYLAND_CLIENT_FOUND AND WAYLAND_EGL_FOUND AND WAYLAND_CURSOR_FOUND AND XKBCO
         set(HAVE_WAYLAND TRUE)
 
         pkg_get_variable(WAYLAND_PROTOCOLS_DIR wayland-protocols pkgdatadir)
+        if(NOT WAYLAND_PROTOCOLS_DIR OR NOT EXISTS "${WAYLAND_PROTOCOLS_DIR}")
+            set(WAYLAND_PROTOCOLS_DIR ${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols)
+            file(MAKE_DIRECTORY ${WAYLAND_PROTOCOLS_DIR}/stable/xdg-shell)
+            file(MAKE_DIRECTORY ${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-decoration)
+            set(XDG_SHELL_URL "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/raw/main/stable/xdg-shell/xdg-shell.xml")
+            set(XDG_DECO_URL "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/raw/main/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml")
+            if(NOT EXISTS ${WAYLAND_PROTOCOLS_DIR}/stable/xdg-shell/xdg-shell.xml)
+                file(DOWNLOAD ${XDG_SHELL_URL} ${WAYLAND_PROTOCOLS_DIR}/stable/xdg-shell/xdg-shell.xml SHOW_PROGRESS)
+            endif()
+            if(NOT EXISTS ${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml)
+                file(DOWNLOAD ${XDG_DECO_URL} ${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml SHOW_PROGRESS)
+            endif()
+        endif()
         set(PROTO_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/proto)
         file(MAKE_DIRECTORY ${PROTO_GEN_DIR})
 
@@ -72,6 +94,7 @@ add_executable(tt
     src/font.cpp
     src/renderer.cpp
     src/app.cpp
+    src/data.cpp
     ${PROTO_GENERATED}
 )
 
@@ -84,6 +107,7 @@ target_link_libraries(tt PRIVATE
     PkgConfig::FREETYPE
     PkgConfig::HARFBUZZ
     PkgConfig::FONTCONFIG
+    nlohmann_json::nlohmann_json
 )
 
 if(HAVE_WAYLAND)

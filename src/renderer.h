@@ -24,6 +24,7 @@ public:
 
     void DrawRect(float x, float y, float w, float h, const Color& c);
     void DrawRoundedRect(float x, float y, float w, float h, float radius, const Color& c);
+    void DrawTriangle(float x1, float y1, float x2, float y2, float x3, float y3, const Color& c);
     void DrawText(const std::string& text, float x, float y, const Color& c);
     void DrawShapedRun(const ShapedRun& run, float x, float y, const Color& c);
     float MeasureText(const std::string& text) const;
