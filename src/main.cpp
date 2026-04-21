@@ -267,11 +267,11 @@ struct WaylandApp {
     EGLSurface     egl_surface = EGL_NO_SURFACE;
     EGLConfig      egl_config  = nullptr;
 
-    int min_width  = 720;
-    int min_height = 900;
+    int min_width  = 480;
+    int min_height = 560;
 
-    int width          = 720;
-    int height         = 980;
+    int width          = 520;
+    int height         = 640;
     int pending_width  = 0;
     int pending_height = 0;
 
@@ -1122,7 +1122,7 @@ int run_x11() {
     swa.event_mask = StructureNotifyMask | ExposureMask | ButtonPressMask | ButtonReleaseMask |
                      PointerMotionMask | KeyPressMask | KeyReleaseMask;
 
-    int width = 720, height = 980;
+    int width = 520, height = 640;
     Window win = XCreateWindow(dpy, RootWindow(dpy, screen), 0, 0, width, height, 0,
                                vi->depth, InputOutput, vi->visual, CWColormap | CWEventMask, &swa);
     XFree(vi);
@@ -1131,8 +1131,8 @@ int run_x11() {
     // Min size hints
     XSizeHints hints{};
     hints.flags = PMinSize;
-    hints.min_width = 720;
-    hints.min_height = 900;
+    hints.min_width = 480;
+    hints.min_height = 560;
     XSetWMNormalHints(dpy, win, &hints);
 
     Atom wm_protocols_atom = XInternAtom(dpy, "WM_PROTOCOLS", False);
