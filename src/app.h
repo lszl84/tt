@@ -50,7 +50,7 @@ struct App {
     static constexpr float BUTTON_HEIGHT = 36.0f;
     static constexpr float INPUT_HEIGHT = 36.0f;
     static constexpr float CORNER_RADIUS = 8.0f;
-    static constexpr float SUMMARY_HEIGHT = 180.0f;
+    static constexpr float SUMMARY_HEIGHT = 260.0f;
 
     // Colors
     static constexpr Color BG           = {0.11f, 0.12f, 0.15f, 1.0f};
