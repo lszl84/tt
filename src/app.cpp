@@ -324,7 +324,11 @@ void App::OnClick(double x, double y) {
 
     // Click on task list
     float listY = inputRowY + inputH + P;
-    float listH = H - listY - SUMMARY_HEIGHT - P;
+    float collapsedListH = H - listY - SUMMARY_HEIGHT - P - BUTTON_HEIGHT - 8;
+    float expandedListH = ROW_HEIGHT * 2 + 8;
+    float listH = collapsedListH + (expandedListH - collapsedListH) * summaryExpandAnim;
+    if (listH < expandedListH) listH = expandedListH;
+
     if (x >= P && x <= W - P && y >= listY && y <= listY + listH) {
         float rowY = listY + 4;
         for (int i = 0; i < (int)tasks.size(); i++) {
