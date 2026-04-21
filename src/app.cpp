@@ -270,8 +270,8 @@ void App::Paint() {
         float titleW = renderer.MeasureText("Today's Summary");
         float hintX = P + 14 + titleW + 12;
         fontManager.SetSize(14 * scale);
-        float smallLineH = fontManager.LineHeight() / scale;
-        float hintY = headerTextY + (LineH() - smallLineH) * 0.5f;
+        float smallAsc = fontManager.Ascent() / scale;
+        float hintY = headerTextY + AscH() - smallAsc;
         renderer.DrawText(hint, hintX, hintY, Color(0.35f, 0.38f, 0.45f, 1.0f));
         fontManager.SetSize(18 * scale);
     }
