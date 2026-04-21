@@ -160,7 +160,16 @@ void App::Paint() {
 
     // ---- Task List ----
     float listY = inputRowY + inputH + P;
-    float listH = H - listY - SUMMARY_HEIGHT - P;
+
+    // Animate summary expansion
+    float targetAnim = summaryExpanded ? 1.0f : 0.0f;
+    summaryExpandAnim += (targetAnim - summaryExpandAnim) * 0.15f;
+    if (std::abs(targetAnim - summaryExpandAnim) < 0.001f) summaryExpandAnim = targetAnim;
+
+    float collapsedListH = H - listY - SUMMARY_HEIGHT - P - BUTTON_HEIGHT - 8;
+    float expandedListH = ROW_HEIGHT * 2 + 8; // show ~2 rows when expanded
+    float listH = collapsedListH + (expandedListH - collapsedListH) * summaryExpandAnim;
+    if (listH < expandedListH) listH = expandedListH;
 
     // Task list background panel
     renderer.DrawRoundedRect(P, listY, W - 2*P, listH, CORNER_RADIUS, PANEL_BG);
@@ -236,9 +245,31 @@ void App::Paint() {
 
     renderer.DrawRoundedRect(P, summaryY, W - 2*P, summaryH, CORNER_RADIUS, SUMMARY_BG);
 
-    float sumTextY = summaryY + 10;
-    renderer.DrawText("Today's Summary", P + 14, sumTextY, ACCENT);
-    sumTextY += LineH() + 4;
+    // Header with hover highlight
+    float headerPad = 10.0f;
+    float headerTextY = summaryY + headerPad;
+    float headerH = LineH() + headerPad * 2;
+    summaryHeaderX = P;
+    summaryHeaderY = summaryY;
+    summaryHeaderW = W - 2*P;
+    summaryHeaderH = headerH;
+
+    summaryHeaderHovered = (mx >= summaryHeaderX && mx <= summaryHeaderX + summaryHeaderW &&
+                            my >= summaryHeaderY && my <= summaryHeaderY + summaryHeaderH);
+
+    if (summaryHeaderHovered) {
+        renderer.DrawRoundedRect(summaryHeaderX + 2, summaryHeaderY + 2,
+                                  summaryHeaderW - 4, headerH - 4, 4.0f,
+                                  Color(0.18f, 0.20f, 0.26f, 1.0f));
+    }
+
+    renderer.DrawText("Today's Summary", P + 14, headerTextY, ACCENT);
+    // Chevron indicator
+    std::string chevron = summaryExpanded ? "v" : "^";
+    float cw = renderer.MeasureText(chevron);
+    renderer.DrawText(chevron, W - P - 14 - cw, headerTextY, TEXT_DIM);
+
+    float sumTextY = summaryY + headerH;
 
     // Compute total
     double totalSec = 0;
@@ -315,6 +346,13 @@ void App::OnClick(double x, double y) {
     float startBtnW = 160.0f;
     if (x >= P && x <= P + startBtnW && y >= btnAreaY && y <= btnAreaY + BUTTON_HEIGHT) {
         ToggleTimer();
+        return;
+    }
+
+    // Click on summary header?
+    if (x >= summaryHeaderX && x <= summaryHeaderX + summaryHeaderW &&
+        y >= summaryHeaderY && y <= summaryHeaderY + summaryHeaderH) {
+        summaryExpanded = !summaryExpanded;
         return;
     }
 

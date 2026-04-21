@@ -44,6 +44,12 @@ struct App {
     // Auto-save
     std::chrono::steady_clock::time_point lastSaveTime = std::chrono::steady_clock::now();
 
+    // Summary panel expand
+    bool summaryExpanded = false;
+    float summaryExpandAnim = 0.0f;
+    bool summaryHeaderHovered = false;
+    float summaryHeaderX = 0, summaryHeaderY = 0, summaryHeaderW = 0, summaryHeaderH = 0;
+
     // UI layout constants
     static constexpr float PADDING = 16.0f;
     static constexpr float ROW_HEIGHT = 40.0f;
