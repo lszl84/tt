@@ -33,6 +33,7 @@ public:
     ~FontManager();
 
     bool Init(int sizePx = 18);
+    bool SetSize(int sizePx);
 
     ShapedRun Shape(const std::string& text) const;
     float MeasureWidth(const std::string& text) const;

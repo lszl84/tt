@@ -67,6 +67,19 @@ bool FontManager::Init(int sizePx) {
     return true;
 }
 
+bool FontManager::SetSize(int sizePx) {
+    if (!ftFace_) return false;
+    FT_Set_Pixel_Sizes(ftFace_, 0, sizePx);
+    ascent_ = ftFace_->size->metrics.ascender / 64.0f;
+    lineHeight_ = ftFace_->size->metrics.height / 64.0f;
+    // Clear atlas and cache
+    curX_ = 1; curY_ = 1; rowH_ = 0;
+    atlasGen_++;
+    std::fill(atlasData_.begin(), atlasData_.end(), 0);
+    for (auto& s : cache_) s.key = ~0ULL;
+    return true;
+}
+
 ShapedRun FontManager::Shape(const std::string& text) const {
     ShapedRun result;
     if (text.empty()) return result;
