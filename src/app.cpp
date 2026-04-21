@@ -264,10 +264,6 @@ void App::Paint() {
     }
 
     renderer.DrawText("Today's Summary", P + 14, headerTextY, ACCENT);
-    // Chevron indicator
-    std::string chevron = summaryExpanded ? "v" : "^";
-    float cw = renderer.MeasureText(chevron);
-    renderer.DrawText(chevron, W - P - 14 - cw, headerTextY, TEXT_DIM);
 
     float sumTextY = summaryY + headerH;
 
