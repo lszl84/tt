@@ -324,8 +324,29 @@ void App::OnClick(double x, double y) {
 }
 
 void App::OnKey(uint32_t key, uint32_t mods) {
-    if (!inputFocused) return;
+    if (!inputFocused) {
+        // Global shortcuts when input is not focused
+        switch (key) {
+        case 0xFF52: // Up
+            if (!tasks.empty()) {
+                selectedTask--;
+                if (selectedTask < 0) selectedTask = (int)tasks.size() - 1;
+            }
+            return;
+        case 0xFF54: // Down
+            if (!tasks.empty()) {
+                selectedTask++;
+                if (selectedTask >= (int)tasks.size()) selectedTask = 0;
+            }
+            return;
+        case 0x20: // Space
+            ToggleTimer();
+            return;
+        }
+        return;
+    }
 
+    // Input field keys
     if (key == 0x08 || key == 0xFF08) { // Backspace
         if (!inputText.empty()) {
             // Remove last UTF-8 codepoint

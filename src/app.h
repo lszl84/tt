@@ -56,7 +56,7 @@ struct App {
     static constexpr Color BG           = {0.11f, 0.12f, 0.15f, 1.0f};
     static constexpr Color PANEL_BG     = {0.15f, 0.16f, 0.20f, 1.0f};
     static constexpr Color TASK_BG      = {0.18f, 0.19f, 0.24f, 1.0f};
-    static constexpr Color TASK_SELECTED= {0.20f, 0.22f, 0.30f, 1.0f};
+    static constexpr Color TASK_SELECTED= {0.28f, 0.32f, 0.48f, 1.0f};
     static constexpr Color TASK_ACTIVE  = {0.14f, 0.24f, 0.20f, 1.0f};
     static constexpr Color TEXT_COLOR   = {0.85f, 0.87f, 0.90f, 1.0f};
     static constexpr Color TEXT_DIM     = {0.55f, 0.58f, 0.63f, 1.0f};
