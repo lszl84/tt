@@ -71,6 +71,7 @@ bool FontManager::Init(int sizePx) {
 bool FontManager::SetSize(int sizePx) {
     if (!ftFace_ || sizePx == currentSizePx_) return true;
     FT_Set_Pixel_Sizes(ftFace_, 0, sizePx);
+    if (hbFont_) hb_ft_font_changed(hbFont_);
     currentSizePx_ = sizePx;
     ascent_ = ftFace_->size->metrics.ascender / 64.0f;
     lineHeight_ = ftFace_->size->metrics.height / 64.0f;
