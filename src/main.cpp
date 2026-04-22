@@ -1043,7 +1043,7 @@ int run_wayland() {
     xdg_surface_add_listener(app.xsurface, &xdg_surface_listener_impl, &app);
     app.toplevel = xdg_surface_get_toplevel(app.xsurface);
     xdg_toplevel_add_listener(app.toplevel, &toplevel_listener_impl, &app);
-    xdg_toplevel_set_app_id(app.toplevel, "time-tracker");
+    xdg_toplevel_set_app_id(app.toplevel, "tt");
     xdg_toplevel_set_title(app.toplevel, "Time Tracker");
     xdg_toplevel_set_min_size(app.toplevel, app.min_width, app.min_height);
 
@@ -1127,6 +1127,12 @@ int run_x11() {
                                vi->depth, InputOutput, vi->visual, CWColormap | CWEventMask, &swa);
     XFree(vi);
     XStoreName(dpy, win, "Time Tracker");
+
+    // Set WM_CLASS for desktop file matching
+    XClassHint classHint{};
+    classHint.res_name = (char*)"tt";
+    classHint.res_class = (char*)"tt";
+    XSetClassHint(dpy, win, &classHint);
 
     // Min size hints
     XSizeHints hints{};
