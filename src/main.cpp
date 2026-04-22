@@ -295,6 +295,10 @@ struct WaylandApp {
 
     bool keyboard_focus = false;
 
+    // Time-based visual state tracking
+    int  lastDisplayedSecond = -1;
+    bool lastCursorBlink     = false;
+
     // Keyboard state
     xkb_context* xkb_ctx = nullptr;
     xkb_keymap*  xkb_km = nullptr;
@@ -544,7 +548,6 @@ void frame_done(void* data, wl_callback* cb, uint32_t) {
     wl_callback_destroy(cb);
     auto& app = *static_cast<WaylandApp*>(data);
     app.frame_pending = false;
-    app.dirty = true;
     if (app.egl_ready) wl_commit_frame(app);
 }
 const wl_callback_listener frame_listener = { .done = frame_done };
@@ -580,11 +583,12 @@ void wl_sync_surface_geometry(WaylandApp& app) {
 }
 
 void wl_commit_frame(WaylandApp& app) {
-    if (!app.egl_ready || !app.dirty || app.frame_pending) return;
+    if (!app.egl_ready || app.frame_pending) return;
 
     if (app.pending_width > 0 && app.pending_height > 0) {
         app.width  = app.pending_width;
         app.height = app.pending_height;
+        app.dirty = true;
     }
     const int sh = wl_eff_shadow(app);
     const int want_w = (app.width  + 2 * sh) * app.scale;
@@ -594,15 +598,56 @@ void wl_commit_frame(WaylandApp& app) {
         app.applied_buffer_w = want_w;
         app.applied_buffer_h = want_h;
         wl_sync_surface_geometry(app);
+        app.dirty = true;
     }
 
     if (app.use_csd) {
         const float target = app.hover_close ? 1.0f : 0.0f;
         const float step = 0.18f;
-        if (target > app.close_hover_amt)
-            app.close_hover_amt = std::min(target, app.close_hover_amt + step);
+        float old = app.close_hover_amt;
+        if (target > old)
+            app.close_hover_amt = std::min(target, old + step);
         else
-            app.close_hover_amt = std::max(target, app.close_hover_amt - step);
+            app.close_hover_amt = std::max(target, old - step);
+        if (app.close_hover_amt != old) app.dirty = true;
+    }
+
+    // Summary animation in progress?
+    float targetAnim = g_app.summaryExpanded ? 1.0f : 0.0f;
+    if (std::abs(g_app.summaryExpandAnim - targetAnim) > 0.001f)
+        app.dirty = true;
+
+    // Active timer: dirty once per second
+    if (g_app.activeTask >= 0 && g_app.activeTask < (int)g_app.tasks.size()) {
+        auto now = std::chrono::steady_clock::now();
+        int sec = (int)std::chrono::duration_cast<std::chrono::seconds>(
+            now - g_app.tasks[g_app.activeTask].startTime).count();
+        if (sec != app.lastDisplayedSecond) {
+            app.lastDisplayedSecond = sec;
+            app.dirty = true;
+        }
+    } else {
+        app.lastDisplayedSecond = -1;
+    }
+
+    // Cursor blink: dirty on phase change
+    if (g_app.inputFocused) {
+        auto now = std::chrono::steady_clock::now();
+        bool blink = std::fmod(std::chrono::duration<float>(now.time_since_epoch()).count(), 1.0f) < 0.5f;
+        if (blink != app.lastCursorBlink) {
+            app.lastCursorBlink = blink;
+            app.dirty = true;
+        }
+    } else {
+        app.lastCursorBlink = false;
+    }
+
+    if (!app.dirty) {
+        // Nothing changed - keep callback alive for input, skip render
+        wl_callback* cb = wl_surface_frame(app.surface);
+        wl_callback_add_listener(cb, &frame_listener, &app);
+        app.frame_pending = true;
+        return;
     }
 
     wl_render_app(app);
