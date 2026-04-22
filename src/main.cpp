@@ -544,6 +544,7 @@ void frame_done(void* data, wl_callback* cb, uint32_t) {
     wl_callback_destroy(cb);
     auto& app = *static_cast<WaylandApp*>(data);
     app.frame_pending = false;
+    app.dirty = true;
     if (app.egl_ready) wl_commit_frame(app);
 }
 const wl_callback_listener frame_listener = { .done = frame_done };
@@ -578,57 +579,40 @@ void wl_sync_surface_geometry(WaylandApp& app) {
     }
 }
 
-bool wl_needs_continuous_frames(const WaylandApp& app) {
-    // Animations
-    if (app.use_csd && std::abs(app.close_hover_amt - (app.hover_close ? 1.0f : 0.0f)) > 0.01f)
-        return true;
-    if (std::abs(g_app.summaryExpandAnim - (g_app.summaryExpanded ? 1.0f : 0.0f)) > 0.001f)
-        return true;
-    // Time-based visuals
-    if (g_app.activeTask >= 0) return true;
-    if (g_app.inputFocused) return true;
-    return false;
-}
-
 void wl_commit_frame(WaylandApp& app) {
-    if (!app.egl_ready || app.frame_pending) return;
+    if (!app.egl_ready || !app.dirty || app.frame_pending) return;
 
-    // Determine if we need to render this frame
-    bool needs_render = app.dirty || wl_needs_continuous_frames(app);
-
-    if (needs_render) {
-        if (app.pending_width > 0 && app.pending_height > 0) {
-            app.width  = app.pending_width;
-            app.height = app.pending_height;
-        }
-        const int sh = wl_eff_shadow(app);
-        const int want_w = (app.width  + 2 * sh) * app.scale;
-        const int want_h = (app.height + 2 * sh) * app.scale;
-        if (want_w != app.applied_buffer_w || want_h != app.applied_buffer_h) {
-            wl_egl_window_resize(app.egl_window, want_w, want_h, 0, 0);
-            app.applied_buffer_w = want_w;
-            app.applied_buffer_h = want_h;
-            wl_sync_surface_geometry(app);
-        }
-
-        if (app.use_csd) {
-            const float target = app.hover_close ? 1.0f : 0.0f;
-            const float step = 0.18f;
-            if (target > app.close_hover_amt)
-                app.close_hover_amt = std::min(target, app.close_hover_amt + step);
-            else
-                app.close_hover_amt = std::max(target, app.close_hover_amt - step);
-        }
-
-        wl_render_app(app);
-        eglSwapBuffers(app.egl_display, app.egl_surface);
-        app.dirty = false;
+    if (app.pending_width > 0 && app.pending_height > 0) {
+        app.width  = app.pending_width;
+        app.height = app.pending_height;
+    }
+    const int sh = wl_eff_shadow(app);
+    const int want_w = (app.width  + 2 * sh) * app.scale;
+    const int want_h = (app.height + 2 * sh) * app.scale;
+    if (want_w != app.applied_buffer_w || want_h != app.applied_buffer_h) {
+        wl_egl_window_resize(app.egl_window, want_w, want_h, 0, 0);
+        app.applied_buffer_w = want_w;
+        app.applied_buffer_h = want_h;
+        wl_sync_surface_geometry(app);
     }
 
-    // Always keep frame callbacks alive for event pacing
+    if (app.use_csd) {
+        const float target = app.hover_close ? 1.0f : 0.0f;
+        const float step = 0.18f;
+        if (target > app.close_hover_amt)
+            app.close_hover_amt = std::min(target, app.close_hover_amt + step);
+        else
+            app.close_hover_amt = std::max(target, app.close_hover_amt - step);
+    }
+
+    wl_render_app(app);
+
     wl_callback* cb = wl_surface_frame(app.surface);
     wl_callback_add_listener(cb, &frame_listener, &app);
     app.frame_pending = true;
+
+    eglSwapBuffers(app.egl_display, app.egl_surface);
+    app.dirty = false;
 }
 
 void xdg_surface_configure(void* data, xdg_surface* s, uint32_t serial) {
