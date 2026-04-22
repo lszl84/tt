@@ -299,6 +299,11 @@ struct WaylandApp {
     int  lastDisplayedSecond = -1;
     bool lastCursorBlink     = false;
 
+    // Performance counters
+    int framesRendered = 0;
+    int framesSkipped  = 0;
+    std::chrono::steady_clock::time_point perfReset = std::chrono::steady_clock::now();
+
     // Keyboard state
     xkb_context* xkb_ctx = nullptr;
     xkb_keymap*  xkb_km = nullptr;
@@ -582,12 +587,26 @@ void wl_sync_surface_geometry(WaylandApp& app) {
     }
 }
 
+bool wl_needs_frame_callback(const WaylandApp& app) {
+    // Need continuous callbacks for animations or time-based visuals
+    if (app.use_csd && std::abs(app.close_hover_amt - (app.hover_close ? 1.0f : 0.0f)) > 0.01f)
+        return true;
+    float targetAnim = g_app.summaryExpanded ? 1.0f : 0.0f;
+    if (std::abs(g_app.summaryExpandAnim - targetAnim) > 0.001f)
+        return true;
+    if (g_app.activeTask >= 0) return true;
+    if (g_app.inputFocused) return true;
+    return false;
+}
+
 void wl_commit_frame(WaylandApp& app) {
     if (!app.egl_ready || app.frame_pending) return;
 
     if (app.pending_width > 0 && app.pending_height > 0) {
         app.width  = app.pending_width;
         app.height = app.pending_height;
+        app.pending_width = 0;
+        app.pending_height = 0;
         app.dirty = true;
     }
     const int sh = wl_eff_shadow(app);
@@ -612,12 +631,10 @@ void wl_commit_frame(WaylandApp& app) {
         if (app.close_hover_amt != old) app.dirty = true;
     }
 
-    // Summary animation in progress?
     float targetAnim = g_app.summaryExpanded ? 1.0f : 0.0f;
     if (std::abs(g_app.summaryExpandAnim - targetAnim) > 0.001f)
         app.dirty = true;
 
-    // Active timer: dirty once per second
     if (g_app.activeTask >= 0 && g_app.activeTask < (int)g_app.tasks.size()) {
         auto now = std::chrono::steady_clock::now();
         int sec = (int)std::chrono::duration_cast<std::chrono::seconds>(
@@ -630,7 +647,6 @@ void wl_commit_frame(WaylandApp& app) {
         app.lastDisplayedSecond = -1;
     }
 
-    // Cursor blink: dirty on phase change
     if (g_app.inputFocused) {
         auto now = std::chrono::steady_clock::now();
         bool blink = std::fmod(std::chrono::duration<float>(now.time_since_epoch()).count(), 1.0f) < 0.5f;
@@ -642,22 +658,40 @@ void wl_commit_frame(WaylandApp& app) {
         app.lastCursorBlink = false;
     }
 
+    // Log performance every 5 seconds
+    {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - app.perfReset).count();
+        if (elapsed >= 5) {
+            int total = app.framesRendered + app.framesSkipped;
+            float fps = total / 5.0f;
+            float renderPct = total > 0 ? (app.framesRendered * 100.0f / total) : 0;
+            std::fprintf(stderr, "[perf] %d rendered, %d skipped (%.1f%% render) @ %.1f Hz\n",
+                         app.framesRendered, app.framesSkipped, renderPct, fps);
+            std::fflush(stderr);
+            app.framesRendered = 0;
+            app.framesSkipped = 0;
+            app.perfReset = now;
+        }
+    }
+
     if (!app.dirty) {
-        // Nothing changed - keep callback alive for input, skip render
-        wl_callback* cb = wl_surface_frame(app.surface);
-        wl_callback_add_listener(cb, &frame_listener, &app);
-        app.frame_pending = true;
+        // Don't request callback when idle - let wl_display_dispatch block on input
         return;
     }
 
     wl_render_app(app);
 
-    wl_callback* cb = wl_surface_frame(app.surface);
-    wl_callback_add_listener(cb, &frame_listener, &app);
-    app.frame_pending = true;
-
     eglSwapBuffers(app.egl_display, app.egl_surface);
     app.dirty = false;
+    app.framesRendered++;
+
+    // Request next callback only if continuous rendering needed
+    if (wl_needs_frame_callback(app)) {
+        wl_callback* cb = wl_surface_frame(app.surface);
+        wl_callback_add_listener(cb, &frame_listener, &app);
+        app.frame_pending = true;
+    }
 }
 
 void xdg_surface_configure(void* data, xdg_surface* s, uint32_t serial) {
@@ -884,6 +918,8 @@ void pointer_button(void* data, wl_pointer*, uint32_t serial, uint32_t,
         }
         // Click in content area - subtract titlebar offset
         g_app.OnClick(app.px, app.py - TITLEBAR_H);
+        app.dirty = true;
+        if (!app.frame_pending) wl_commit_frame(app);
     } else {
         if (app.close_pressed) {
             app.close_pressed = false;
@@ -955,6 +991,8 @@ void keyboard_key(void* data, wl_keyboard*, uint32_t, uint32_t, uint32_t key, ui
             g_app.OnChar(cp);
         }
     }
+    app.dirty = true;
+    if (!app.frame_pending) wl_commit_frame(app);
 }
 
 void keyboard_modifiers(void* data, wl_keyboard*, uint32_t, uint32_t mods_depressed,
@@ -1146,6 +1184,7 @@ int run_wayland() {
     g_app.scale = app.scale;
     g_app.Init();
     app.egl_ready = true;
+    app.perfReset = std::chrono::steady_clock::now();
     wl_commit_frame(app);
 
     while (app.running && wl_display_dispatch(app.display) != -1) {
