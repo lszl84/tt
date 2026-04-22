@@ -51,8 +51,7 @@ double App::GetTaskTime(int idx) const {
     if (idx < 0 || idx >= (int)tasks.size()) return 0;
     double t = tasks[idx].totalSeconds;
     if (tasks[idx].active) {
-        auto now = std::chrono::steady_clock::now();
-        t += std::chrono::duration<double>(now - tasks[idx].startTime).count();
+        t += std::chrono::duration<double>(frameNow - tasks[idx].startTime).count();
     }
     return t;
 }
@@ -90,11 +89,13 @@ void App::ToggleTimer() {
 void App::Paint() {
     if (!glReady) return;
 
+    // Snapshot time once per frame so every timer display is perfectly in sync
+    frameNow = std::chrono::steady_clock::now();
+
     // Auto-save every 30 seconds
-    auto now = std::chrono::steady_clock::now();
-    if (std::chrono::duration_cast<std::chrono::seconds>(now - lastSaveTime).count() >= 30) {
+    if (std::chrono::duration_cast<std::chrono::seconds>(frameNow - lastSaveTime).count() >= 30) {
         Save();
-        lastSaveTime = now;
+        lastSaveTime = frameNow;
     }
 
     CheckFontScale();
@@ -139,8 +140,7 @@ void App::Paint() {
         // Cursor blink
         if (inputFocused) {
             float cursorX = P + 10 + renderer.MeasureText(displayText);
-            auto now = std::chrono::steady_clock::now();
-            float blink = std::fmod(std::chrono::duration<float>(now.time_since_epoch()).count(), 1.0f);
+            float blink = std::fmod(std::chrono::duration<float>(frameNow.time_since_epoch()).count(), 1.0f);
             if (blink < 0.5f) {
                 renderer.DrawRect(cursorX, textY + 2, 2, LineH() - 4, TEXT_COLOR);
             }

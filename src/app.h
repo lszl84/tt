@@ -44,6 +44,9 @@ struct App {
     // Auto-save
     std::chrono::steady_clock::time_point lastSaveTime = std::chrono::steady_clock::now();
 
+    // Frame-consistent time sampling (so task times and totals never drift mid-frame)
+    std::chrono::steady_clock::time_point frameNow = std::chrono::steady_clock::now();
+
     // Summary panel expand
     bool summaryExpanded = false;
     float summaryExpandAnim = 0.0f;
@@ -85,6 +88,11 @@ struct App {
     double GetTaskTime(int idx) const;
     std::string FormatTime(double seconds) const;
     void Save();
+
+    bool IsAnimating() const {
+        float target = summaryExpanded ? 1.0f : 0.0f;
+        return std::abs(target - summaryExpandAnim) >= 0.001f;
+    }
 
     // Logical-pixel font metrics (divide physical by scale)
     float LineH() const { return fontManager.LineHeight() / scale; }

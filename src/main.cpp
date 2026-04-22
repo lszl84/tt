@@ -544,8 +544,16 @@ void frame_done(void* data, wl_callback* cb, uint32_t) {
     wl_callback_destroy(cb);
     auto& app = *static_cast<WaylandApp*>(data);
     app.frame_pending = false;
-    app.dirty = true;
-    if (app.egl_ready) wl_commit_frame(app);
+    // Chain frame callbacks while animations are in progress
+    if (app.use_csd) {
+        const float target = app.hover_close ? 1.0f : 0.0f;
+        if (std::abs(target - app.close_hover_amt) > 0.001f) {
+            app.dirty = true;
+        }
+    }
+    if (g_app.IsAnimating()) {
+        app.dirty = true;
+    }
 }
 const wl_callback_listener frame_listener = { .done = frame_done };
 
@@ -600,11 +608,15 @@ void wl_commit_frame(WaylandApp& app) {
 
     if (app.use_csd) {
         const float target = app.hover_close ? 1.0f : 0.0f;
-        const float step = 0.18f;
+        static auto last_anim = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        float dt = std::min(std::chrono::duration<float>(now - last_anim).count(), 0.05f);
+        last_anim = now;
+        const float speed = 10.0f; // per second
         if (target > app.close_hover_amt)
-            app.close_hover_amt = std::min(target, app.close_hover_amt + step);
+            app.close_hover_amt = std::min(target, app.close_hover_amt + speed * dt);
         else
-            app.close_hover_amt = std::max(target, app.close_hover_amt - step);
+            app.close_hover_amt = std::max(target, app.close_hover_amt - speed * dt);
     }
 
     wl_render_app(app);
@@ -615,6 +627,18 @@ void wl_commit_frame(WaylandApp& app) {
 
     eglSwapBuffers(app.egl_display, app.egl_surface);
     app.dirty = false;
+
+    static auto t0 = std::chrono::steady_clock::now();
+    static int frameCount = 0;
+    frameCount++;
+    auto now = std::chrono::steady_clock::now();
+    auto sec = std::chrono::duration<double>(now - t0).count();
+    if (sec >= 5.0) {
+        std::fprintf(stderr, "[perf] %.1f fps (%.0f ms/frame)\n",
+                     frameCount / sec, 1000.0 * sec / frameCount);
+        frameCount = 0;
+        t0 = now;
+    }
 }
 
 void xdg_surface_configure(void* data, xdg_surface* s, uint32_t serial) {
@@ -801,6 +825,7 @@ void pointer_motion(void* data, wl_pointer*, uint32_t, wl_fixed_t sx, wl_fixed_t
     g_app.mx = app.px;
     g_app.my = (app.py > TITLEBAR_H) ? app.py - TITLEBAR_H : app.py;
     update_hover(app);
+    app.dirty = true;   // content button hovers need a repaint
 }
 void pointer_button(void* data, wl_pointer*, uint32_t serial, uint32_t,
                     uint32_t button, uint32_t state) {
@@ -825,12 +850,19 @@ void pointer_button(void* data, wl_pointer*, uint32_t serial, uint32_t,
     g_app.mouseDown = pressed;
 
     if (!app.use_csd) {
-        if (pressed) g_app.OnClick(app.px, app.py);
+        if (pressed) {
+            g_app.OnClick(app.px, app.py);
+            app.dirty = true;
+            if (!app.frame_pending) wl_commit_frame(app);
+        }
         return;
     }
     if (pressed) {
         if (in_close(app, app.px, app.py)) {
-            app.close_pressed = true; return;
+            app.close_pressed = true;
+            app.dirty = true;
+            if (!app.frame_pending) wl_commit_frame(app);
+            return;
         }
         const uint32_t edge = edge_for(app, app.px, app.py);
         if (edge != XDG_TOPLEVEL_RESIZE_EDGE_NONE) {
@@ -841,10 +873,18 @@ void pointer_button(void* data, wl_pointer*, uint32_t serial, uint32_t,
         }
         // Click in content area - subtract titlebar offset
         g_app.OnClick(app.px, app.py - TITLEBAR_H);
+        app.dirty = true;
+        if (!app.frame_pending) wl_commit_frame(app);
     } else {
         if (app.close_pressed) {
             app.close_pressed = false;
+            app.dirty = true;
+            if (!app.frame_pending) wl_commit_frame(app);
             if (in_close(app, app.px, app.py)) app.running = false;
+        } else {
+            // Mouse released in content area — update button highlight
+            app.dirty = true;
+            if (!app.frame_pending) wl_commit_frame(app);
         }
     }
 }
@@ -912,6 +952,8 @@ void keyboard_key(void* data, wl_keyboard*, uint32_t, uint32_t, uint32_t key, ui
             g_app.OnChar(cp);
         }
     }
+    app.dirty = true;
+    if (!app.frame_pending) wl_commit_frame(app);
 }
 
 void keyboard_modifiers(void* data, wl_keyboard*, uint32_t, uint32_t mods_depressed,
@@ -1105,8 +1147,53 @@ int run_wayland() {
     app.egl_ready = true;
     wl_commit_frame(app);
 
-    while (app.running && wl_display_dispatch(app.display) != -1) {
-        // Frame callbacks drive rendering
+    while (app.running) {
+        if (wl_display_dispatch_pending(app.display) == -1) break;
+        if (!app.running) break;
+
+        // Render immediately if input events or frame callbacks made us dirty.
+        // This keeps hover feedback and close-button animation smooth.
+        if (app.dirty && app.egl_ready && !app.frame_pending) {
+            wl_commit_frame(app);
+        }
+
+        if (wl_display_flush(app.display) == -1) break;
+
+        int fd = wl_display_get_fd(app.display);
+        struct pollfd pfd = { fd, POLLIN, 0 };
+
+        int timeout_ms = -1;
+        if (g_app.activeTask >= 0 || g_app.inputFocused) {
+            auto now = std::chrono::steady_clock::now();
+            auto next = now + std::chrono::hours(24);
+            if (g_app.activeTask >= 0) {
+                auto elapsed = now - g_app.tasks[g_app.activeTask].startTime;
+                auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+                next = std::min(next, now + std::chrono::milliseconds(1000 - (ms % 1000)));
+            }
+            // Only blink at 500ms when there is no active task;
+            // timer + total must tick together on 1-second boundaries.
+            if (g_app.inputFocused && g_app.activeTask < 0) {
+                auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+                next = std::min(next, now + std::chrono::milliseconds(500 - (ms % 500)));
+            }
+            timeout_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count();
+            timeout_ms = std::max(0, timeout_ms);
+        }
+        if (wl_display_prepare_read(app.display) != 0) continue;
+
+        int ret = poll(&pfd, 1, timeout_ms);
+        if (ret < 0) {
+            wl_display_cancel_read(app.display);
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (ret > 0 && (pfd.revents & POLLIN)) {
+            if (wl_display_read_events(app.display) == -1) break;
+        } else {
+            wl_display_cancel_read(app.display);
+            app.dirty = true;
+        }
     }
 
     if (app.xkb_st) xkb_state_unref(app.xkb_st);
@@ -1291,11 +1378,13 @@ int run_x11() {
                     if (cp >= 0x20 && cp != 0x7F) g_app.OnChar(cp);
                     i += n;
                 }
+                x11_dirty = true;
                 break;
             }
             case FocusOut:
                 if (g_app.inputFocused) {
                     g_app.inputFocused = false;
+                    x11_dirty = true;
                 }
                 break;
             case ClientMessage:
@@ -1315,19 +1404,27 @@ int run_x11() {
         drain_events(running);
         if (!running) break;
 
+        static auto last_paint = std::chrono::steady_clock::now();
+
         // Determine if we need to render
         bool needs_render = x11_dirty;
+        auto now = std::chrono::steady_clock::now();
         if (!needs_render) {
-            // Check if time-based updates are due
-            auto now = std::chrono::steady_clock::now();
-            if (g_app.activeTask >= 0) {
+            if (g_app.IsAnimating()) {
+                auto ms_since = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_paint).count();
+                if (ms_since >= 16) needs_render = true;
+            }
+            if (!needs_render && g_app.activeTask >= 0) {
                 auto elapsed = now - g_app.tasks[g_app.activeTask].startTime;
                 auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-                if (ms % 1000 < 50) needs_render = true; // near second boundary
+                auto last_elapsed = last_paint - g_app.tasks[g_app.activeTask].startTime;
+                auto last_ms = std::chrono::duration_cast<std::chrono::milliseconds>(last_elapsed).count();
+                if (ms / 1000 != last_ms / 1000) needs_render = true;
             }
-            if (g_app.inputFocused) {
+            if (!needs_render && g_app.inputFocused) {
                 auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-                if (ms % 500 < 50) needs_render = true; // near blink boundary
+                auto last_ms = std::chrono::duration_cast<std::chrono::milliseconds>(last_paint.time_since_epoch()).count();
+                if ((ms / 500) != (last_ms / 500)) needs_render = true;
             }
         }
 
@@ -1343,23 +1440,28 @@ int run_x11() {
             g_app.scale = 1;
             g_app.Paint();
 
-            glFinish();
             eglSwapBuffers(egl_dpy, egl_srf);
             if (have_sync) thaw_counter();
             x11_dirty = false;
+            last_paint = std::chrono::steady_clock::now();
         }
 
         // Compute sleep time
         int timeout_ms = -1;
-        if (g_app.activeTask >= 0 || g_app.inputFocused) {
-            auto now = std::chrono::steady_clock::now();
+        if (g_app.IsAnimating()) {
+            auto ms_since = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                now - last_paint).count();
+            timeout_ms = std::max(0, 16 - (int)ms_since);
+        } else if (g_app.activeTask >= 0 || g_app.inputFocused) {
             auto next = now + std::chrono::hours(24);
             if (g_app.activeTask >= 0) {
                 auto elapsed = now - g_app.tasks[g_app.activeTask].startTime;
                 auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
                 next = std::min(next, now + std::chrono::milliseconds(1000 - (ms % 1000)));
             }
-            if (g_app.inputFocused) {
+            // Only blink at 500ms when there is no active task;
+            // timer + total must tick together on 1-second boundaries.
+            if (g_app.inputFocused && g_app.activeTask < 0) {
                 auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
                 next = std::min(next, now + std::chrono::milliseconds(500 - (ms % 500)));
             }
