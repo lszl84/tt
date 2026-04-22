@@ -267,7 +267,7 @@ struct WaylandApp {
     EGLSurface     egl_surface = EGL_NO_SURFACE;
     EGLConfig      egl_config  = nullptr;
 
-    int min_width  = 400;
+    int min_width  = 360;
     int min_height = 560;
 
     int width          = 520;
@@ -485,7 +485,7 @@ void wl_render_app(WaylandApp& app) {
     // Draw title text into title bar
     {
         int oldSize = g_app.fontManager.CurrentSize();
-        g_app.fontManager.SetSize(20 * S);
+        g_app.fontManager.SetSize(18 * S);
         float textW = g_app.renderer.MeasureText("TT");
         float textX = sh * S + (app.width * S - textW) / 2.0f;
         float textY = sh * S + (TITLEBAR_H * S - g_app.fontManager.LineHeight()) / 2.0f;
@@ -1244,7 +1244,7 @@ int run_x11() {
     // Min size hints
     XSizeHints hints{};
     hints.flags = PMinSize;
-    hints.min_width = 400;
+    hints.min_width = 360;
     hints.min_height = 560;
     XSetWMNormalHints(dpy, win, &hints);
 

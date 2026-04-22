@@ -7,7 +7,7 @@
 
 void App::Init() {
     lastFontScale = scale;
-    if (!fontManager.Init(18 * scale)) {
+    if (!fontManager.Init(16 * scale)) {
         std::fprintf(stderr, "Font init failed\n");
         return;
     }
@@ -268,10 +268,10 @@ void App::Paint() {
         float titleW = renderer.MeasureText("Today's Summary");
         float hintX = P + 14 + titleW + 12;
         float titleCenter = headerTextY + LineH() * 0.5f;
-        fontManager.SetSize(14 * scale);
+        fontManager.SetSize(12 * scale);
         float hintY = titleCenter - (fontManager.LineHeight() / scale) * 0.5f;
         renderer.DrawText(hint, hintX, hintY, Color(0.35f, 0.38f, 0.45f, 1.0f));
-        fontManager.SetSize(18 * scale);
+        fontManager.SetSize(16 * scale);
     }
 
     float sumTextY = summaryY + headerH;
