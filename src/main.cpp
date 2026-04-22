@@ -293,6 +293,8 @@ struct WaylandApp {
     uint32_t    last_enter_serial = 0;
     const char* current_cursor    = nullptr;
 
+    bool keyboard_focus = false;
+
     // Keyboard state
     xkb_context* xkb_ctx = nullptr;
     xkb_keymap*  xkb_km = nullptr;
@@ -542,8 +544,7 @@ void frame_done(void* data, wl_callback* cb, uint32_t) {
     wl_callback_destroy(cb);
     auto& app = *static_cast<WaylandApp*>(data);
     app.frame_pending = false;
-    app.dirty = true;
-    wl_commit_frame(app);
+    if (app.dirty && app.egl_ready) wl_commit_frame(app);
 }
 const wl_callback_listener frame_listener = { .done = frame_done };
 
@@ -577,6 +578,47 @@ void wl_sync_surface_geometry(WaylandApp& app) {
     }
 }
 
+bool wl_needs_continuous_frames(const WaylandApp& app) {
+    // Animations
+    if (app.use_csd && std::abs(app.close_hover_amt - (app.hover_close ? 1.0f : 0.0f)) > 0.01f)
+        return true;
+    if (std::abs(g_app.summaryExpandAnim - (g_app.summaryExpanded ? 1.0f : 0.0f)) > 0.001f)
+        return true;
+    // Time-based visuals
+    if (g_app.activeTask >= 0) return true;
+    if (g_app.inputFocused) return true;
+    return false;
+}
+
+int wl_next_timeout_ms() {
+    auto now = std::chrono::steady_clock::now();
+    auto next = now + std::chrono::hours(24);
+
+    // Active task: next second boundary
+    if (g_app.activeTask >= 0 && g_app.activeTask < (int)g_app.tasks.size()) {
+        auto elapsed = now - g_app.tasks[g_app.activeTask].startTime;
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+        auto next_sec = now + std::chrono::milliseconds(1000 - (ms % 1000));
+        if (next_sec < next) next = next_sec;
+    }
+    // Cursor blink: every 500ms
+    if (g_app.inputFocused) {
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        auto next_blink = now + std::chrono::milliseconds(500 - (ms % 500));
+        if (next_blink < next) next = next_blink;
+    }
+    // Auto-save: every 30s
+    {
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - g_app.lastSaveTime).count();
+        auto next_save = now + std::chrono::seconds(30 - (elapsed % 30));
+        if (next_save < next) next = next_save;
+    }
+
+    if (next > now + std::chrono::hours(23)) return -1;
+    int ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count();
+    return std::max(0, ms);
+}
+
 void wl_commit_frame(WaylandApp& app) {
     if (!app.egl_ready || !app.dirty || app.frame_pending) return;
 
@@ -605,9 +647,12 @@ void wl_commit_frame(WaylandApp& app) {
 
     wl_render_app(app);
 
-    wl_callback* cb = wl_surface_frame(app.surface);
-    wl_callback_add_listener(cb, &frame_listener, &app);
-    app.frame_pending = true;
+    // Only request another frame callback if continuous rendering needed
+    if (wl_needs_continuous_frames(app)) {
+        wl_callback* cb = wl_surface_frame(app.surface);
+        wl_callback_add_listener(cb, &frame_listener, &app);
+        app.frame_pending = true;
+    }
 
     eglSwapBuffers(app.egl_display, app.egl_surface);
     app.dirty = false;
@@ -868,8 +913,19 @@ void keyboard_keymap(void* data, wl_keyboard*, uint32_t format, int fd, uint32_t
     if (app.xkb_km) app.xkb_st = xkb_state_new(app.xkb_km);
 }
 
-void keyboard_enter(void*, wl_keyboard*, uint32_t, wl_surface*, wl_array*) {}
-void keyboard_leave(void*, wl_keyboard*, uint32_t, wl_surface*) {}
+void keyboard_enter(void* data, wl_keyboard*, uint32_t, wl_surface*, wl_array*) {
+    auto& app = *static_cast<WaylandApp*>(data);
+    app.keyboard_focus = true;
+}
+void keyboard_leave(void* data, wl_keyboard*, uint32_t, wl_surface*) {
+    auto& app = *static_cast<WaylandApp*>(data);
+    app.keyboard_focus = false;
+    if (g_app.inputFocused) {
+        g_app.inputFocused = false;
+        app.dirty = true;
+        if (!app.frame_pending) wl_commit_frame(app);
+    }
+}
 
 void keyboard_key(void* data, wl_keyboard*, uint32_t, uint32_t, uint32_t key, uint32_t state) {
     auto& app = *static_cast<WaylandApp*>(data);
@@ -1090,8 +1146,34 @@ int run_wayland() {
     app.egl_ready = true;
     wl_commit_frame(app);
 
-    while (app.running && wl_display_dispatch(app.display) != -1) {
-        // Frame callbacks drive rendering
+    while (app.running) {
+        wl_display_dispatch_pending(app.display);
+        if (app.dirty && app.egl_ready && !app.frame_pending)
+            wl_commit_frame(app);
+        wl_display_flush(app.display);
+
+        int timeout_ms = wl_next_timeout_ms();
+        if (app.frame_pending) timeout_ms = -1; // block until frame callback
+
+        int fd = wl_display_get_fd(app.display);
+        struct pollfd pfd = { fd, POLLIN, 0 };
+        int ret = poll(&pfd, 1, timeout_ms);
+        if (ret < 0) {
+            if (errno != EINTR) break;
+            continue;
+        }
+
+        if (ret == 0) {
+            // Timeout: time-based update is due
+            app.dirty = true;
+            continue;
+        }
+
+        if (pfd.revents & POLLIN) {
+            if (wl_display_prepare_read(app.display) == 0) {
+                wl_display_read_events(app.display);
+            }
+        }
     }
 
     if (app.xkb_st) xkb_state_unref(app.xkb_st);
@@ -1145,7 +1227,7 @@ int run_x11() {
     XSetWindowAttributes swa{};
     swa.colormap = cmap;
     swa.event_mask = StructureNotifyMask | ExposureMask | ButtonPressMask | ButtonReleaseMask |
-                     PointerMotionMask | KeyPressMask | KeyReleaseMask;
+                     PointerMotionMask | KeyPressMask | KeyReleaseMask | FocusChangeMask;
 
     int width = 520, height = 640;
     Window win = XCreateWindow(dpy, RootWindow(dpy, screen), 0, 0, width, height, 0,
@@ -1227,6 +1309,7 @@ int run_x11() {
 
     const int x_fd = ConnectionNumber(dpy);
     bool running = true;
+    bool x11_dirty = true;
 
     auto drain_events = [&](bool& alive) {
         while (XPending(dpy)) {
@@ -1234,18 +1317,23 @@ int run_x11() {
             switch (ev.type) {
             case ConfigureNotify:
                 width = ev.xconfigure.width; height = ev.xconfigure.height;
+                x11_dirty = true;
                 break;
             case Expose:
+                x11_dirty = true;
                 break;
             case ButtonPress:
                 g_app.mouseDown = true;
                 g_app.OnClick((double)ev.xbutton.x, (double)ev.xbutton.y);
+                x11_dirty = true;
                 break;
             case ButtonRelease:
                 g_app.mouseDown = false;
+                x11_dirty = true;
                 break;
             case MotionNotify:
                 g_app.mx = (double)ev.xmotion.x; g_app.my = (double)ev.xmotion.y;
+                x11_dirty = true;
                 break;
             case KeyPress: {
                 KeySym sym = XLookupKeysym(&ev.xkey, 0);
@@ -1272,6 +1360,11 @@ int run_x11() {
                 }
                 break;
             }
+            case FocusOut:
+                if (g_app.inputFocused) {
+                    g_app.inputFocused = false;
+                }
+                break;
             case ClientMessage:
                 if (ev.xclient.message_type == wm_protocols_atom) {
                     if (static_cast<Atom>(ev.xclient.data.l[0]) == wm_delete) alive = false;
@@ -1285,33 +1378,64 @@ int run_x11() {
         }
     };
 
-    auto last_frame = std::chrono::steady_clock::now();
     while (running) {
         drain_events(running);
         if (!running) break;
 
-        if (have_sync) freeze_counter(current_counter);
+        // Determine if we need to render
+        bool needs_render = x11_dirty;
+        if (!needs_render) {
+            // Check if time-based updates are due
+            auto now = std::chrono::steady_clock::now();
+            if (g_app.activeTask >= 0) {
+                auto elapsed = now - g_app.tasks[g_app.activeTask].startTime;
+                auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+                if (ms % 1000 < 50) needs_render = true; // near second boundary
+            }
+            if (g_app.inputFocused) {
+                auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+                if (ms % 500 < 50) needs_render = true; // near blink boundary
+            }
+        }
 
-        EGLint srf_w = width, srf_h = height;
-        eglQuerySurface(egl_dpy, egl_srf, EGL_WIDTH, &srf_w);
-        eglQuerySurface(egl_dpy, egl_srf, EGL_HEIGHT, &srf_h);
+        if (needs_render) {
+            if (have_sync) freeze_counter(current_counter);
 
-        g_app.winW = srf_w; g_app.winH = srf_h;
-        g_app.bufW = srf_w; g_app.bufH = srf_h;
-        g_app.scale = 1;
-        g_app.Paint();
+            EGLint srf_w = width, srf_h = height;
+            eglQuerySurface(egl_dpy, egl_srf, EGL_WIDTH, &srf_w);
+            eglQuerySurface(egl_dpy, egl_srf, EGL_HEIGHT, &srf_h);
 
-        glFinish();
-        eglSwapBuffers(egl_dpy, egl_srf);
-        if (have_sync) thaw_counter();
+            g_app.winW = srf_w; g_app.winH = srf_h;
+            g_app.bufW = srf_w; g_app.bufH = srf_h;
+            g_app.scale = 1;
+            g_app.Paint();
 
-        last_frame += std::chrono::microseconds(16000);
-        auto now = std::chrono::steady_clock::now();
-        int wait_us = static_cast<int>(std::chrono::duration_cast<std::chrono::microseconds>(last_frame - now).count());
-        if (wait_us < 0) { wait_us = 0; last_frame = now; }
-        if (wait_us > 16000) wait_us = 16000;
+            glFinish();
+            eglSwapBuffers(egl_dpy, egl_srf);
+            if (have_sync) thaw_counter();
+            x11_dirty = false;
+        }
+
+        // Compute sleep time
+        int timeout_ms = -1;
+        if (g_app.activeTask >= 0 || g_app.inputFocused) {
+            auto now = std::chrono::steady_clock::now();
+            auto next = now + std::chrono::hours(24);
+            if (g_app.activeTask >= 0) {
+                auto elapsed = now - g_app.tasks[g_app.activeTask].startTime;
+                auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+                next = std::min(next, now + std::chrono::milliseconds(1000 - (ms % 1000)));
+            }
+            if (g_app.inputFocused) {
+                auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+                next = std::min(next, now + std::chrono::milliseconds(500 - (ms % 500)));
+            }
+            timeout_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count();
+            timeout_ms = std::max(0, timeout_ms);
+        }
+
         struct pollfd pfd{ x_fd, POLLIN, 0 };
-        poll(&pfd, 1, wait_us / 1000);
+        poll(&pfd, 1, timeout_ms);
     }
 
     if (have_sync) {
