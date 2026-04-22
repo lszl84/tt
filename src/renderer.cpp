@@ -269,3 +269,30 @@ void Renderer::PopClip() {
     FlushBatch();
     glDisable(GL_SCISSOR_TEST);
 }
+
+void Renderer::DrawTextDirect(const FontManager& fm, int bufW, int bufH, int logicW, int logicH,
+                               const std::string& text, float x, float y, const Color& c) {
+    // Save state
+    int oldVpW = vpW_, oldVpH = vpH_;
+    int oldLogicW = logicW_, oldLogicH = logicH_;
+    float oldPxScale = pxScale_;
+    const FontManager* oldFm = fm_;
+
+    // Set new state
+    vpW_ = bufW; vpH_ = bufH;
+    logicW_ = logicW; logicH_ = logicH;
+    pxScale_ = (logicW > 0) ? (float)bufW / logicW : 1.0f;
+    fm_ = &fm;
+
+    glViewport(0, 0, vpW_, vpH_);
+    UpdateAtlasTexture();
+
+    DrawText(text, x, y, c);
+    EndFrame();
+
+    // Restore state
+    vpW_ = oldVpW; vpH_ = oldVpH;
+    logicW_ = oldLogicW; logicH_ = oldLogicH;
+    pxScale_ = oldPxScale;
+    fm_ = oldFm;
+}

@@ -32,6 +32,11 @@ public:
     void PushClip(float x, float y, float w, float h);
     void PopClip();
 
+    // Direct draw to current framebuffer without BeginFrame/EndFrame.
+    // Useful for overlay drawing (e.g., CSD title bar text).
+    void DrawTextDirect(const FontManager& fm, int bufW, int bufH, int logicW, int logicH,
+                        const std::string& text, float x, float y, const Color& c);
+
     int ViewportW() const { return vpW_; }
     int ViewportH() const { return vpH_; }
 

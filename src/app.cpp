@@ -107,10 +107,8 @@ void App::Paint() {
     // ---- Background ----
     renderer.DrawRect(0, 0, W, H, BG);
 
-    // ---- Title ----
-    float titleY = P;
-    renderer.DrawText("Time Tracker", P, titleY, TEXT_COLOR);
-    float titleBottom = titleY + LineH() + 8;
+    // Title is drawn in the CSD title bar, not here
+    float titleBottom = P + 4;
 
     // ---- Input + Add button row ----
     float inputRowY = titleBottom;
@@ -313,7 +311,7 @@ void App::OnClick(double x, double y) {
     float H = (float)winH;
     float P = PADDING;
 
-    float titleBottom = P + LineH() + 8;
+    float titleBottom = P + 4;
     float inputRowY = titleBottom;
     float inputH = INPUT_HEIGHT;
     float btnW = 80.0f;

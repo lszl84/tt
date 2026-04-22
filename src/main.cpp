@@ -480,6 +480,18 @@ void wl_render_app(WaylandApp& app) {
     glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_SCISSOR_TEST);
 
+    // Draw title text into title bar
+    {
+        int oldSize = g_app.fontManager.CurrentSize();
+        g_app.fontManager.SetSize(20 * S);
+        float textW = g_app.renderer.MeasureText("TT");
+        float textX = sh * S + (app.width * S - textW) / 2.0f;
+        float textY = sh * S + (TITLEBAR_H * S - g_app.fontManager.LineHeight()) / 2.0f;
+        g_app.renderer.DrawTextDirect(g_app.fontManager, W, H, W, H,
+                                       "TT", textX, textY, Color(1.0f, 1.0f, 1.0f, 1.0f));
+        g_app.fontManager.SetSize(oldSize);
+    }
+
     // Blit content FBO into correct position in main FBO
     // Content sits below the titlebar, inside the shadow margins
     // In GL y-up coords: content occupies (sh*S, sh*S) to (sh*S+contentW, sh*S+contentH)
@@ -789,10 +801,23 @@ void pointer_motion(void* data, wl_pointer*, uint32_t, wl_fixed_t sx, wl_fixed_t
 void pointer_button(void* data, wl_pointer*, uint32_t serial, uint32_t,
                     uint32_t button, uint32_t state) {
     auto& app = *static_cast<WaylandApp*>(data);
-    constexpr uint32_t BTN_LEFT = 0x110;
-    if (button != BTN_LEFT) return;
+    constexpr uint32_t BTN_LEFT  = 0x110;
+    constexpr uint32_t BTN_RIGHT = 0x111;
 
     const bool pressed = state == WL_POINTER_BUTTON_STATE_PRESSED;
+
+    if (button == BTN_RIGHT && pressed) {
+        if (!app.use_csd) return;
+        // Right-click on title bar: ask compositor to show window menu
+        if (app.py < TITLEBAR_H && !in_close(app, app.px, app.py)) {
+            xdg_toplevel_show_window_menu(app.toplevel, app.seat, serial,
+                                          (int32_t)app.px, (int32_t)app.py);
+        }
+        return;
+    }
+
+    if (button != BTN_LEFT) return;
+
     g_app.mouseDown = pressed;
 
     if (!app.use_csd) {
@@ -1126,7 +1151,7 @@ int run_x11() {
     Window win = XCreateWindow(dpy, RootWindow(dpy, screen), 0, 0, width, height, 0,
                                vi->depth, InputOutput, vi->visual, CWColormap | CWEventMask, &swa);
     XFree(vi);
-    XStoreName(dpy, win, "Time Tracker");
+    XStoreName(dpy, win, "TT");
 
     // Set WM_CLASS for desktop file matching
     XClassHint classHint{};
