@@ -128,3 +128,10 @@ endif()
 
 message(STATUS "Wayland backend: ${HAVE_WAYLAND}")
 message(STATUS "X11 backend:     ${HAVE_X11}")
+
+# Install
+install(TARGETS tt DESTINATION bin)
+if(LINUX OR CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+    install(FILES tt.desktop DESTINATION share/applications)
+    install(FILES tt.svg DESTINATION share/icons/hicolor/scalable/apps)
+endif()

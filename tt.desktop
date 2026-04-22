@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=tt
+Comment=Minimal time tracker
+Exec=tt
+Terminal=false
+Type=Application
+Icon=tt
+Categories=Office;
+Keywords=time;tracker;productivity;
+StartupWMClass=tt
