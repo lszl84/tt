@@ -56,4 +56,4 @@ The platform layer creates the window, manages the GL context, and drives the fr
 
 ## License
 
-MIT
+GPLv3
