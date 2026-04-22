@@ -267,7 +267,7 @@ struct WaylandApp {
     EGLSurface     egl_surface = EGL_NO_SURFACE;
     EGLConfig      egl_config  = nullptr;
 
-    int min_width  = 360;
+    int min_width  = 320;
     int min_height = 560;
 
     int width          = 520;
@@ -544,7 +544,7 @@ void frame_done(void* data, wl_callback* cb, uint32_t) {
     wl_callback_destroy(cb);
     auto& app = *static_cast<WaylandApp*>(data);
     app.frame_pending = false;
-    if (app.dirty && app.egl_ready) wl_commit_frame(app);
+    if (app.egl_ready) wl_commit_frame(app);
 }
 const wl_callback_listener frame_listener = { .done = frame_done };
 
@@ -590,72 +590,45 @@ bool wl_needs_continuous_frames(const WaylandApp& app) {
     return false;
 }
 
-int wl_next_timeout_ms() {
-    auto now = std::chrono::steady_clock::now();
-    auto next = now + std::chrono::hours(24);
-
-    // Active task: next second boundary
-    if (g_app.activeTask >= 0 && g_app.activeTask < (int)g_app.tasks.size()) {
-        auto elapsed = now - g_app.tasks[g_app.activeTask].startTime;
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-        auto next_sec = now + std::chrono::milliseconds(1000 - (ms % 1000));
-        if (next_sec < next) next = next_sec;
-    }
-    // Cursor blink: every 500ms
-    if (g_app.inputFocused) {
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-        auto next_blink = now + std::chrono::milliseconds(500 - (ms % 500));
-        if (next_blink < next) next = next_blink;
-    }
-    // Auto-save: every 30s
-    {
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - g_app.lastSaveTime).count();
-        auto next_save = now + std::chrono::seconds(30 - (elapsed % 30));
-        if (next_save < next) next = next_save;
-    }
-
-    if (next > now + std::chrono::hours(23)) return -1;
-    int ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count();
-    return std::max(0, ms);
-}
-
 void wl_commit_frame(WaylandApp& app) {
-    if (!app.egl_ready || !app.dirty || app.frame_pending) return;
+    if (!app.egl_ready || app.frame_pending) return;
 
-    if (app.pending_width > 0 && app.pending_height > 0) {
-        app.width  = app.pending_width;
-        app.height = app.pending_height;
+    // Determine if we need to render this frame
+    bool needs_render = app.dirty || wl_needs_continuous_frames(app);
+
+    if (needs_render) {
+        if (app.pending_width > 0 && app.pending_height > 0) {
+            app.width  = app.pending_width;
+            app.height = app.pending_height;
+        }
+        const int sh = wl_eff_shadow(app);
+        const int want_w = (app.width  + 2 * sh) * app.scale;
+        const int want_h = (app.height + 2 * sh) * app.scale;
+        if (want_w != app.applied_buffer_w || want_h != app.applied_buffer_h) {
+            wl_egl_window_resize(app.egl_window, want_w, want_h, 0, 0);
+            app.applied_buffer_w = want_w;
+            app.applied_buffer_h = want_h;
+            wl_sync_surface_geometry(app);
+        }
+
+        if (app.use_csd) {
+            const float target = app.hover_close ? 1.0f : 0.0f;
+            const float step = 0.18f;
+            if (target > app.close_hover_amt)
+                app.close_hover_amt = std::min(target, app.close_hover_amt + step);
+            else
+                app.close_hover_amt = std::max(target, app.close_hover_amt - step);
+        }
+
+        wl_render_app(app);
+        eglSwapBuffers(app.egl_display, app.egl_surface);
+        app.dirty = false;
     }
-    const int sh = wl_eff_shadow(app);
-    const int want_w = (app.width  + 2 * sh) * app.scale;
-    const int want_h = (app.height + 2 * sh) * app.scale;
-    if (want_w != app.applied_buffer_w || want_h != app.applied_buffer_h) {
-        wl_egl_window_resize(app.egl_window, want_w, want_h, 0, 0);
-        app.applied_buffer_w = want_w;
-        app.applied_buffer_h = want_h;
-        wl_sync_surface_geometry(app);
-    }
 
-    if (app.use_csd) {
-        const float target = app.hover_close ? 1.0f : 0.0f;
-        const float step = 0.18f;
-        if (target > app.close_hover_amt)
-            app.close_hover_amt = std::min(target, app.close_hover_amt + step);
-        else
-            app.close_hover_amt = std::max(target, app.close_hover_amt - step);
-    }
-
-    wl_render_app(app);
-
-    // Only request another frame callback if continuous rendering needed
-    if (wl_needs_continuous_frames(app)) {
-        wl_callback* cb = wl_surface_frame(app.surface);
-        wl_callback_add_listener(cb, &frame_listener, &app);
-        app.frame_pending = true;
-    }
-
-    eglSwapBuffers(app.egl_display, app.egl_surface);
-    app.dirty = false;
+    // Always keep frame callbacks alive for event pacing
+    wl_callback* cb = wl_surface_frame(app.surface);
+    wl_callback_add_listener(cb, &frame_listener, &app);
+    app.frame_pending = true;
 }
 
 void xdg_surface_configure(void* data, xdg_surface* s, uint32_t serial) {
@@ -1146,34 +1119,8 @@ int run_wayland() {
     app.egl_ready = true;
     wl_commit_frame(app);
 
-    while (app.running) {
-        wl_display_dispatch_pending(app.display);
-        if (app.dirty && app.egl_ready && !app.frame_pending)
-            wl_commit_frame(app);
-        wl_display_flush(app.display);
-
-        int timeout_ms = wl_next_timeout_ms();
-        if (app.frame_pending) timeout_ms = -1; // block until frame callback
-
-        int fd = wl_display_get_fd(app.display);
-        struct pollfd pfd = { fd, POLLIN, 0 };
-        int ret = poll(&pfd, 1, timeout_ms);
-        if (ret < 0) {
-            if (errno != EINTR) break;
-            continue;
-        }
-
-        if (ret == 0) {
-            // Timeout: time-based update is due
-            app.dirty = true;
-            continue;
-        }
-
-        if (pfd.revents & POLLIN) {
-            if (wl_display_prepare_read(app.display) == 0) {
-                wl_display_read_events(app.display);
-            }
-        }
+    while (app.running && wl_display_dispatch(app.display) != -1) {
+        // Frame callbacks drive rendering
     }
 
     if (app.xkb_st) xkb_state_unref(app.xkb_st);
@@ -1244,7 +1191,7 @@ int run_x11() {
     // Min size hints
     XSizeHints hints{};
     hints.flags = PMinSize;
-    hints.min_width = 360;
+    hints.min_width = 320;
     hints.min_height = 560;
     XSetWMNormalHints(dpy, win, &hints);
 
