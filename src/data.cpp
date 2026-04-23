@@ -110,15 +110,17 @@ bool LoadState(App& app) {
         // Restore active sessions
         for (const auto& a : j.value("active", nlohmann::json::array())) {
             std::string name = a.value("task", "");
-            for (auto& t : app.tasks) {
-                if (t.name == name) {
-                    t.active = true;
+            for (size_t i = 0; i < app.tasks.size(); ++i) {
+                if (app.tasks[i].name == name) {
+                    app.tasks[i].active = true;
                     std::string startStr = a.value("start", "");
-                    if (!startStr.empty()) t.wallStart = ParseISO(startStr);
+                    if (!startStr.empty()) app.tasks[i].wallStart = ParseISO(startStr);
                     double elapsed = a.value("elapsed", 0.0);
                     auto offset = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                         std::chrono::duration<double>(elapsed));
-                    t.steadyStart = std::chrono::steady_clock::now() - offset;
+                    app.tasks[i].steadyStart = std::chrono::steady_clock::now() - offset;
+                    app.activeTask = (int)i;
+                    app.selectedTask = (int)i;
                     break;
                 }
             }
