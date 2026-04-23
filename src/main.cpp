@@ -215,6 +215,7 @@ struct WaylandApp {
     wl_seat*            seat           = nullptr;
     wl_pointer*         pointer        = nullptr;
     wl_keyboard*        keyboard       = nullptr;
+    wl_touch*           touch          = nullptr;
     wl_shm*             shm            = nullptr;
 
     bool                use_csd        = true;
@@ -977,6 +978,67 @@ const wl_keyboard_listener keyboard_listener_impl = {
     .key = keyboard_key, .modifiers = keyboard_modifiers, .repeat_info = keyboard_repeat_info,
 };
 
+// Touch support: single-finger tap and drag mapped to existing mouse/click logic
+void touch_down(void* data, wl_touch*, uint32_t serial, uint32_t, wl_surface*, int32_t, wl_fixed_t sx, wl_fixed_t sy) {
+    auto& app = *static_cast<WaylandApp*>(data);
+    const double o = double(wl_eff_shadow(app));
+    app.px = wl_fixed_to_double(sx) - o;
+    app.py = wl_fixed_to_double(sy) - o;
+    g_app.mx = app.px;
+    g_app.my = (app.py > TITLEBAR_H) ? app.py - TITLEBAR_H : app.py;
+    g_app.mouseDown = true;
+
+    if (!app.use_csd) {
+        g_app.OnClick(app.px, app.py);
+        app.dirty = true;
+        if (!app.frame_pending) wl_commit_frame(app);
+        return;
+    }
+    if (in_close(app, app.px, app.py)) {
+        app.close_pressed = true;
+        app.dirty = true;
+        if (!app.frame_pending) wl_commit_frame(app);
+        return;
+    }
+    const uint32_t edge = edge_for(app, app.px, app.py);
+    if (edge != XDG_TOPLEVEL_RESIZE_EDGE_NONE) {
+        xdg_toplevel_resize(app.toplevel, app.seat, serial, edge);
+        return;
+    }
+    if (app.py < TITLEBAR_H) {
+        xdg_toplevel_move(app.toplevel, app.seat, serial);
+        return;
+    }
+    g_app.OnClick(app.px, app.py - TITLEBAR_H);
+    app.dirty = true;
+    if (!app.frame_pending) wl_commit_frame(app);
+}
+void touch_up(void* data, wl_touch*, uint32_t, uint32_t, int32_t) {
+    auto& app = *static_cast<WaylandApp*>(data);
+    g_app.mouseDown = false;
+    if (app.close_pressed) {
+        app.close_pressed = false;
+        app.dirty = true;
+        if (!app.frame_pending) wl_commit_frame(app);
+        if (in_close(app, app.px, app.py)) app.running = false;
+    }
+}
+void touch_motion(void* data, wl_touch*, uint32_t, int32_t, wl_fixed_t sx, wl_fixed_t sy) {
+    auto& app = *static_cast<WaylandApp*>(data);
+    const double o = double(wl_eff_shadow(app));
+    app.px = wl_fixed_to_double(sx) - o;
+    app.py = wl_fixed_to_double(sy) - o;
+    g_app.mx = app.px;
+    g_app.my = (app.py > TITLEBAR_H) ? app.py - TITLEBAR_H : app.py;
+    app.dirty = true;
+}
+void touch_frame(void*, wl_touch*) {}
+void touch_cancel(void*, wl_touch*) {}
+const wl_touch_listener touch_listener_impl = {
+    .down = touch_down, .up = touch_up, .motion = touch_motion,
+    .frame = touch_frame, .cancel = touch_cancel,
+};
+
 void seat_capabilities(void* data, wl_seat* seat, uint32_t caps) {
     auto& app = *static_cast<WaylandApp*>(data);
     const bool has_ptr = caps & WL_SEAT_CAPABILITY_POINTER;
@@ -992,6 +1054,13 @@ void seat_capabilities(void* data, wl_seat* seat, uint32_t caps) {
         wl_keyboard_add_listener(app.keyboard, &keyboard_listener_impl, &app);
     } else if (!has_kbd && app.keyboard) {
         wl_keyboard_destroy(app.keyboard); app.keyboard = nullptr;
+    }
+    const bool has_touch = caps & WL_SEAT_CAPABILITY_TOUCH;
+    if (has_touch && !app.touch) {
+        app.touch = wl_seat_get_touch(seat);
+        wl_touch_add_listener(app.touch, &touch_listener_impl, &app);
+    } else if (!has_touch && app.touch) {
+        wl_touch_destroy(app.touch); app.touch = nullptr;
     }
 }
 void seat_name(void*, wl_seat*, const char*) {}
