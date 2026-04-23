@@ -1167,7 +1167,7 @@ int run_wayland() {
             auto now = std::chrono::steady_clock::now();
             auto next = now + std::chrono::hours(24);
             if (g_app.activeTask >= 0) {
-                auto elapsed = now - g_app.tasks[g_app.activeTask].startTime;
+                auto elapsed = now - g_app.tasks[g_app.activeTask].steadyStart;
                 auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
                 next = std::min(next, now + std::chrono::milliseconds(1000 - (ms % 1000)));
             }
@@ -1415,9 +1415,9 @@ int run_x11() {
                 if (ms_since >= 16) needs_render = true;
             }
             if (!needs_render && g_app.activeTask >= 0) {
-                auto elapsed = now - g_app.tasks[g_app.activeTask].startTime;
+                auto elapsed = now - g_app.tasks[g_app.activeTask].steadyStart;
                 auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-                auto last_elapsed = last_paint - g_app.tasks[g_app.activeTask].startTime;
+                auto last_elapsed = last_paint - g_app.tasks[g_app.activeTask].steadyStart;
                 auto last_ms = std::chrono::duration_cast<std::chrono::milliseconds>(last_elapsed).count();
                 if (ms / 1000 != last_ms / 1000) needs_render = true;
             }
@@ -1455,7 +1455,7 @@ int run_x11() {
         } else if (g_app.activeTask >= 0 || g_app.inputFocused) {
             auto next = now + std::chrono::hours(24);
             if (g_app.activeTask >= 0) {
-                auto elapsed = now - g_app.tasks[g_app.activeTask].startTime;
+                auto elapsed = now - g_app.tasks[g_app.activeTask].steadyStart;
                 auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
                 next = std::min(next, now + std::chrono::milliseconds(1000 - (ms % 1000)));
             }

@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <chrono>
-#include <functional>
+#include <ctime>
 
 // ============================================================================
 // Time Tracker Data
@@ -13,8 +13,15 @@
 struct Task {
     std::string name;
     bool active = false;
-    std::chrono::steady_clock::time_point startTime;
-    double totalSeconds = 0;
+    std::chrono::steady_clock::time_point steadyStart;
+    std::time_t wallStart = 0;
+};
+
+struct TimeSession {
+    std::string taskName;
+    std::time_t start = 0;
+    std::time_t end = 0;
+    double seconds = 0;
 };
 
 struct App {
@@ -40,6 +47,9 @@ struct App {
     std::vector<Task> tasks;
     int selectedTask = -1; // which task is selected in the list
     int activeTask = -1;   // which task is currently tracking
+
+    // Session log (completed tracking sessions with wall-clock dates)
+    std::vector<TimeSession> sessions;
 
     // Auto-save
     std::chrono::steady_clock::time_point lastSaveTime = std::chrono::steady_clock::now();

@@ -49,11 +49,16 @@ std::string App::FormatTime(double seconds) const {
 
 double App::GetTaskTime(int idx) const {
     if (idx < 0 || idx >= (int)tasks.size()) return 0;
-    double t = tasks[idx].totalSeconds;
-    if (tasks[idx].active) {
-        t += std::chrono::duration<double>(frameNow - tasks[idx].startTime).count();
+    auto today = TodayMidnight();
+    double total = 0;
+    for (const auto& s : sessions) {
+        if (s.taskName == tasks[idx].name && s.start >= today)
+            total += s.seconds;
     }
-    return t;
+    if (tasks[idx].active) {
+        total += std::chrono::duration<double>(frameNow - tasks[idx].steadyStart).count();
+    }
+    return total;
 }
 
 void App::AddTask(const std::string& name) {
@@ -67,21 +72,26 @@ void App::ToggleTimer() {
 
     // If another task is active, stop it first
     if (activeTask >= 0 && activeTask != selectedTask && tasks[activeTask].active) {
-        auto now = std::chrono::steady_clock::now();
-        tasks[activeTask].totalSeconds += std::chrono::duration<double>(now - tasks[activeTask].startTime).count();
+        auto now_steady = std::chrono::steady_clock::now();
+        auto now_wall = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        double elapsed = std::chrono::duration<double>(now_steady - tasks[activeTask].steadyStart).count();
+        sessions.push_back({tasks[activeTask].name, tasks[activeTask].wallStart, now_wall, elapsed});
         tasks[activeTask].active = false;
     }
 
     if (tasks[selectedTask].active) {
         // Stop
-        auto now = std::chrono::steady_clock::now();
-        tasks[selectedTask].totalSeconds += std::chrono::duration<double>(now - tasks[selectedTask].startTime).count();
+        auto now_steady = std::chrono::steady_clock::now();
+        auto now_wall = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        double elapsed = std::chrono::duration<double>(now_steady - tasks[selectedTask].steadyStart).count();
+        sessions.push_back({tasks[selectedTask].name, tasks[selectedTask].wallStart, now_wall, elapsed});
         tasks[selectedTask].active = false;
         activeTask = -1;
     } else {
         // Start
         tasks[selectedTask].active = true;
-        tasks[selectedTask].startTime = std::chrono::steady_clock::now();
+        tasks[selectedTask].steadyStart = std::chrono::steady_clock::now();
+        tasks[selectedTask].wallStart = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         activeTask = selectedTask;
     }
 }
