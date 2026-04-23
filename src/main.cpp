@@ -12,9 +12,15 @@
 //
 // X11 backend: EGL window with _NET_WM_SYNC_REQUEST for smooth resize.
 
-#define GL_GLEXT_PROTOTYPES 1
-#include <GL/gl.h>
-#include <GL/glext.h>
+#ifdef __APPLE__
+#  define GL_SILENCE_DEPRECATION 1
+#  include <OpenGL/gl3.h>
+#  include <OpenGL/gl3ext.h>
+#else
+#  define GL_GLEXT_PROTOTYPES 1
+#  include <GL/gl.h>
+#  include <GL/glext.h>
+#endif
 
 #ifdef HAVE_WAYLAND
 #include <wayland-client.h>
@@ -1490,7 +1496,20 @@ int run_x11() {
 
 } // namespace
 
+#ifdef __APPLE__
+// Implemented in main_macos.mm. Owns the full platform layer on macOS:
+// NSApplication, NSWindow, NSOpenGLContext, event loop. On entry the App
+// is uninitialized; run_macos() calls g_app.Init() once it has a GL
+// context and returns when the window closes.
+int run_macos(App& app);
+#endif
+
 int main() {
+#ifdef __APPLE__
+    int rc = run_macos(g_app);
+    g_app.Save();
+    return rc;
+#endif
 #ifdef HAVE_WAYLAND
     if (std::getenv("WAYLAND_DISPLAY")) {
         int rc = run_wayland();

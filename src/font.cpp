@@ -1,8 +1,14 @@
 #include "font.h"
-#include <fontconfig/fontconfig.h>
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+
+#ifdef __APPLE__
+#  include <CoreText/CoreText.h>
+#  include <CoreFoundation/CoreFoundation.h>
+#else
+#  include <fontconfig/fontconfig.h>
+#endif
 
 FontManager::FontManager() = default;
 
@@ -12,6 +18,37 @@ FontManager::~FontManager() {
     if (ft_) FT_Done_FreeType(ft_);
 }
 
+#ifdef __APPLE__
+std::string FontManager::FindFont(const char* family) const {
+    CFStringRef name = CFStringCreateWithCString(nullptr, family, kCFStringEncodingUTF8);
+    if (!name) return {};
+    CTFontDescriptorRef desc = CTFontDescriptorCreateWithNameAndSize(name, 0.0);
+    CFRelease(name);
+    if (!desc) return {};
+
+    std::string path;
+    CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
+    if (url) {
+        char buf[1024];
+        if (CFURLGetFileSystemRepresentation(url, true, (UInt8*)buf, sizeof(buf))) {
+            // CoreText will happily return *any* font when asked for an unknown
+            // family. Verify the family actually matches, so the caller's
+            // fallback chain still works instead of locking in the first hit.
+            CFStringRef matched = (CFStringRef)CTFontDescriptorCopyAttribute(desc, kCTFontFamilyNameAttribute);
+            if (matched) {
+                char mbuf[256];
+                if (CFStringGetCString(matched, mbuf, sizeof(mbuf), kCFStringEncodingUTF8)) {
+                    if (std::strcmp(mbuf, family) == 0) path = buf;
+                }
+                CFRelease(matched);
+            }
+        }
+        CFRelease(url);
+    }
+    CFRelease(desc);
+    return path;
+}
+#else
 std::string FontManager::FindFont(const char* family) const {
     FcInit();
     FcPattern* pat = FcPatternCreate();
@@ -31,13 +68,19 @@ std::string FontManager::FindFont(const char* family) const {
     FcPatternDestroy(pat);
     return path;
 }
+#endif
 
 bool FontManager::Init(int sizePx) {
     if (FT_Init_FreeType(&ft_)) return false;
 
-    // Try a few monospace/sans fonts
+    // Try a few sans fonts. On macOS we prefer the system font (SF Pro) via
+    // its public family name, then fall back to what's likely installed.
     const char* tryFonts[] = {
-        "Inter", "Noto Sans", "DejaVu Sans", "Liberation Sans", "FreeSans"
+#ifdef __APPLE__
+        "Inter", "SF Pro Text", "Helvetica Neue", "Helvetica", "Arial",
+#else
+        "Inter", "Noto Sans", "DejaVu Sans", "Liberation Sans", "FreeSans",
+#endif
     };
     std::string path;
     for (auto name : tryFonts) {
@@ -47,6 +90,20 @@ bool FontManager::Init(int sizePx) {
             break;
         }
     }
+#ifdef __APPLE__
+    // Last-resort: load Helvetica.ttc directly. Ships with every macOS
+    // install, so this only fails if the OS is badly broken.
+    if (path.empty()) {
+        const char* fallback = "/System/Library/Fonts/Helvetica.ttc";
+        FT_Face probe = nullptr;
+        if (FT_New_Face(ft_, fallback, 0, &probe) == 0) {
+            FT_Done_Face(probe);
+            path = fallback;
+            std::fprintf(stderr, "Font: system fallback (%s)\n", fallback);
+        }
+    }
+#endif
+
     if (path.empty()) {
         std::fprintf(stderr, "No suitable font found\n");
         return false;
