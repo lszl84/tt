@@ -52,6 +52,7 @@ std::time_t ParseISO(const std::string& s) {
     std::tm tm = {};
     std::istringstream ss(s);
     ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+    tm.tm_isdst = -1; // let mktime determine DST from the date
     return std::mktime(&tm);
 }
 
@@ -116,9 +117,6 @@ bool LoadState(App& app) {
                     std::string startStr = a.value("start", "");
                     if (!startStr.empty()) {
                         app.tasks[i].wallStart = ParseISO(startStr);
-                        // Continue tracking across app restarts:
-                        // steadyStart is set so that (steady_now - steadyStart)
-                        // equals the wall-clock elapsed time since wallStart.
                         std::time_t now_t = std::time(nullptr);
                         double elapsed_sec = std::max(0.0,
                             std::difftime(now_t, app.tasks[i].wallStart));
