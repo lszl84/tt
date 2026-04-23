@@ -104,7 +104,7 @@ bool LoadState(App& app) {
             std::string endStr = s.value("end", "");
             if (!startStr.empty()) sess.start = ParseISO(startStr);
             if (!endStr.empty()) sess.end = ParseISO(endStr);
-            sess.seconds = s.value("seconds", 0.0);
+            sess.seconds = std::max(0.0, std::difftime(sess.end, sess.start));
             app.sessions.push_back(std::move(sess));
         }
 
@@ -160,7 +160,6 @@ bool SaveState(const App& app) {
         sess["task"] = s.taskName;
         sess["start"] = FormatISO(s.start);
         sess["end"] = FormatISO(s.end);
-        sess["seconds"] = s.seconds;
         j["sessions"].push_back(sess);
     }
 
