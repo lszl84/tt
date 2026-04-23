@@ -114,11 +114,18 @@ bool LoadState(App& app) {
                 if (app.tasks[i].name == name) {
                     app.tasks[i].active = true;
                     std::string startStr = a.value("start", "");
-                    if (!startStr.empty()) app.tasks[i].wallStart = ParseISO(startStr);
-                    double elapsed = a.value("elapsed", 0.0);
-                    auto offset = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                        std::chrono::duration<double>(elapsed));
-                    app.tasks[i].steadyStart = std::chrono::steady_clock::now() - offset;
+                    if (!startStr.empty()) {
+                        app.tasks[i].wallStart = ParseISO(startStr);
+                        // Continue tracking across app restarts:
+                        // steadyStart is set so that (steady_now - steadyStart)
+                        // equals the wall-clock elapsed time since wallStart.
+                        std::time_t now_t = std::time(nullptr);
+                        double elapsed_sec = std::max(0.0,
+                            std::difftime(now_t, app.tasks[i].wallStart));
+                        auto offset = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                            std::chrono::duration<double>(elapsed_sec));
+                        app.tasks[i].steadyStart = std::chrono::steady_clock::now() - offset;
+                    }
                     app.activeTask = (int)i;
                     app.selectedTask = (int)i;
                     break;
@@ -160,14 +167,11 @@ bool SaveState(const App& app) {
     }
 
     j["active"] = nlohmann::json::array();
-    auto now_steady = std::chrono::steady_clock::now();
     for (const auto& t : app.tasks) {
         if (t.active) {
-            double elapsed = std::chrono::duration<double>(now_steady - t.steadyStart).count();
             nlohmann::json a;
             a["task"] = t.name;
             a["start"] = FormatISO(t.wallStart);
-            a["elapsed"] = elapsed;
             j["active"].push_back(a);
         }
     }
