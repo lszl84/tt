@@ -4,6 +4,74 @@
 #include <ctime>
 #include <cstdio>
 #include <cmath>
+#include <utility>
+
+namespace {
+
+std::time_t StartOfDay(std::time_t t) {
+    std::tm tm = *std::localtime(&t);
+    tm.tm_hour = 0; tm.tm_min = 0; tm.tm_sec = 0;
+    tm.tm_isdst = -1;
+    return std::mktime(&tm);
+}
+
+std::time_t AddDays(std::time_t t, int days) {
+    std::tm tm = *std::localtime(&t);
+    tm.tm_mday += days;
+    tm.tm_isdst = -1;
+    return std::mktime(&tm);
+}
+
+std::time_t StartOfWeekMonday(std::time_t t) {
+    std::time_t day = StartOfDay(t);
+    std::tm tm = *std::localtime(&day);
+    int daysFromMonday = (tm.tm_wday + 6) % 7; // Mon=0, Sun=6
+    return AddDays(day, -daysFromMonday);
+}
+
+std::pair<std::time_t, std::time_t> GetRangeBounds(SummaryRange r) {
+    std::time_t now = std::time(nullptr);
+    std::time_t today = StartOfDay(now);
+    std::time_t thisWeek = StartOfWeekMonday(now);
+    switch (r) {
+    case SummaryRange::Today:
+        return {today, AddDays(today, 1)};
+    case SummaryRange::ThisWeek:
+        return {thisWeek, AddDays(thisWeek, 7)};
+    case SummaryRange::TwoWeeks:
+        return {AddDays(thisWeek, -7), AddDays(thisWeek, 7)};
+    case SummaryRange::PrevWeek:
+        return {AddDays(thisWeek, -7), thisWeek};
+    case SummaryRange::PrevTwoWeeks:
+        return {AddDays(thisWeek, -14), thisWeek};
+    default:
+        return {today, AddDays(today, 1)};
+    }
+}
+
+const char* RangeLabel(SummaryRange r) {
+    switch (r) {
+    case SummaryRange::Today:        return "Today";
+    case SummaryRange::ThisWeek:     return "This Week";
+    case SummaryRange::TwoWeeks:     return "Two Weeks";
+    case SummaryRange::PrevWeek:     return "Prev Week";
+    case SummaryRange::PrevTwoWeeks: return "Prev Two Weeks";
+    default: return "Today";
+    }
+}
+
+const char* RangeHeader(SummaryRange r) {
+    switch (r) {
+    case SummaryRange::Today:        return "Today's Summary";
+    case SummaryRange::ThisWeek:     return "This Week Summary";
+    case SummaryRange::TwoWeeks:     return "Two Weeks Summary";
+    case SummaryRange::PrevWeek:     return "Prev Week Summary";
+    case SummaryRange::PrevTwoWeeks: return "Prev Two Weeks Summary";
+    default: return "Summary";
+    }
+}
+
+} // namespace
 
 void App::Init() {
     lastFontScale = scale;
@@ -49,14 +117,24 @@ std::string App::FormatTime(double seconds) const {
 
 double App::GetTaskTime(int idx) const {
     if (idx < 0 || idx >= (int)tasks.size()) return 0;
-    auto today = TodayMidnight();
+    auto [rangeStart, rangeEnd] = GetRangeBounds(summaryRange);
     double total = 0;
     for (const auto& s : sessions) {
-        if (s.taskName == tasks[idx].name && s.start >= today)
+        if (s.taskName == tasks[idx].name && s.start >= rangeStart && s.start < rangeEnd)
             total += s.seconds;
     }
     if (tasks[idx].active) {
-        total += std::chrono::duration<double>(frameNow - tasks[idx].steadyStart).count();
+        std::time_t now = std::time(nullptr);
+        if (now >= rangeStart && now < rangeEnd) {
+            double fullElapsed = std::chrono::duration<double>(frameNow - tasks[idx].steadyStart).count();
+            if (tasks[idx].wallStart >= rangeStart) {
+                total += fullElapsed;
+            } else {
+                // Session began before this range; clip to range start
+                double beforeRange = std::difftime(rangeStart, tasks[idx].wallStart);
+                total += std::max(0.0, fullElapsed - beforeRange);
+            }
+        }
     }
     return total;
 }
@@ -271,11 +349,12 @@ void App::Paint() {
                                   Color(0.18f, 0.20f, 0.26f, 1.0f));
     }
 
-    renderer.DrawText("Today's Summary", P + 14, headerTextY, ACCENT);
+    std::string headerText = RangeHeader(summaryRange);
+    renderer.DrawText(headerText, P + 14, headerTextY, ACCENT);
 
     if (summaryHeaderHovered) {
         std::string hint = summaryExpanded ? "(click to collapse)" : "(click to expand)";
-        float titleW = renderer.MeasureText("Today's Summary");
+        float titleW = renderer.MeasureText(headerText);
         float hintX = P + 14 + titleW + 12;
         float titleCenter = headerTextY + LineH() * 0.5f;
         fontManager.SetSize(12 * scale);
@@ -294,13 +373,20 @@ void App::Paint() {
     renderer.DrawText("Total: " + FormatTime(totalSec), P + 14, sumTextY, TEXT_COLOR);
     sumTextY += LineH() + 2;
 
+    // Reserve space at the bottom for the range selector (grows with expand animation)
+    const float selectorBtnSize = 28.0f;
+    const float selectorPad = 10.0f;
+    const float selectorFullH = selectorBtnSize + selectorPad * 2;
+    float selectorReserve = selectorFullH * summaryExpandAnim;
+    float breakdownBottom = summaryY + summaryH - 4 - selectorReserve;
+
     // Per-task breakdown
-    renderer.PushClip(P + 2, sumTextY, W - 2*P - 4, summaryY + summaryH - sumTextY - 4);
+    renderer.PushClip(P + 2, sumTextY, W - 2*P - 4, std::max(0.0f, breakdownBottom - sumTextY));
     int shown = 0;
     for (int i = 0; i < (int)tasks.size(); i++) {
         double t = GetTaskTime(i);
         float textY2 = sumTextY + (LineH() + 4) * shown;
-        if (textY2 + LineH() > summaryY + summaryH - 4) break;
+        if (textY2 + LineH() > breakdownBottom) break;
 
         // Name
         renderer.DrawText(tasks[i].name, P + 14, textY2, TEXT_DIM);
@@ -312,6 +398,64 @@ void App::Paint() {
         shown++;
     }
     renderer.PopClip();
+
+    // Range selector (only while expanded)
+    if (summaryExpandAnim > 0.01f) {
+        float selY = summaryY + summaryH - selectorBtnSize - selectorPad;
+        float btnW = selectorBtnSize;
+        float btnH = selectorBtnSize;
+
+        // Left button
+        rangeLeftX = P + selectorPad;
+        rangeLeftY = selY;
+        rangeLeftW = btnW;
+        rangeLeftH = btnH;
+        bool leftHover = (mx >= rangeLeftX && mx <= rangeLeftX + rangeLeftW &&
+                          my >= rangeLeftY && my <= rangeLeftY + rangeLeftH);
+        Color leftBg = leftHover ? Color(0.22f, 0.24f, 0.30f, 1.0f)
+                                 : Color(0.17f, 0.18f, 0.22f, 1.0f);
+        renderer.DrawRoundedRect(rangeLeftX, rangeLeftY, rangeLeftW, rangeLeftH, 6.0f, leftBg);
+        {
+            float tPad = 9.0f;
+            float tx_point = rangeLeftX + tPad;
+            float tx_base  = rangeLeftX + rangeLeftW - tPad;
+            float ty_top   = rangeLeftY + tPad;
+            float ty_bot   = rangeLeftY + rangeLeftH - tPad;
+            float ty_mid   = rangeLeftY + rangeLeftH * 0.5f;
+            renderer.DrawTriangle(tx_point, ty_mid, tx_base, ty_top, tx_base, ty_bot, TEXT_COLOR);
+        }
+
+        // Right button
+        rangeRightX = W - P - selectorPad - btnW;
+        rangeRightY = selY;
+        rangeRightW = btnW;
+        rangeRightH = btnH;
+        bool rightHover = (mx >= rangeRightX && mx <= rangeRightX + rangeRightW &&
+                           my >= rangeRightY && my <= rangeRightY + rangeRightH);
+        Color rightBg = rightHover ? Color(0.22f, 0.24f, 0.30f, 1.0f)
+                                   : Color(0.17f, 0.18f, 0.22f, 1.0f);
+        renderer.DrawRoundedRect(rangeRightX, rangeRightY, rangeRightW, rangeRightH, 6.0f, rightBg);
+        {
+            float tPad = 9.0f;
+            float tx_base  = rangeRightX + tPad;
+            float tx_point = rangeRightX + rangeRightW - tPad;
+            float ty_top   = rangeRightY + tPad;
+            float ty_bot   = rangeRightY + rangeRightH - tPad;
+            float ty_mid   = rangeRightY + rangeRightH * 0.5f;
+            renderer.DrawTriangle(tx_base, ty_top, tx_base, ty_bot, tx_point, ty_mid, TEXT_COLOR);
+        }
+
+        // Label centered between buttons
+        std::string label = RangeLabel(summaryRange);
+        float labelW = renderer.MeasureText(label);
+        float midX = P + (W - 2 * P) * 0.5f;
+        float labelY = selY + (btnH - LineH()) * 0.5f;
+        renderer.DrawText(label, midX - labelW * 0.5f, labelY, TEXT_COLOR);
+    } else {
+        // Selector not visible — reset hitboxes so clicks don't accidentally trigger
+        rangeLeftW = rangeLeftH = 0;
+        rangeRightW = rangeRightH = 0;
+    }
 
     renderer.EndFrame();
 }
@@ -366,6 +510,25 @@ void App::OnClick(double x, double y) {
     if (x >= P && x <= P + startBtnW && y >= btnAreaY && y <= btnAreaY + BUTTON_HEIGHT) {
         ToggleTimer();
         return;
+    }
+
+    // Click on range selector buttons (only while expanded)
+    if (summaryExpandAnim > 0.5f) {
+        int count = static_cast<int>(SummaryRange::Count);
+        if (rangeLeftW > 0 && rangeLeftH > 0 &&
+            x >= rangeLeftX && x <= rangeLeftX + rangeLeftW &&
+            y >= rangeLeftY && y <= rangeLeftY + rangeLeftH) {
+            int cur = static_cast<int>(summaryRange);
+            summaryRange = static_cast<SummaryRange>((cur - 1 + count) % count);
+            return;
+        }
+        if (rangeRightW > 0 && rangeRightH > 0 &&
+            x >= rangeRightX && x <= rangeRightX + rangeRightW &&
+            y >= rangeRightY && y <= rangeRightY + rangeRightH) {
+            int cur = static_cast<int>(summaryRange);
+            summaryRange = static_cast<SummaryRange>((cur + 1) % count);
+            return;
+        }
     }
 
     // Click on summary header?

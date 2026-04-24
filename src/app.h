@@ -24,6 +24,15 @@ struct TimeSession {
     double seconds = 0;
 };
 
+enum class SummaryRange : int {
+    Today = 0,
+    ThisWeek,
+    TwoWeeks,
+    PrevWeek,
+    PrevTwoWeeks,
+    Count
+};
+
 struct App {
     // Fonts & rendering
     FontManager fontManager;
@@ -62,6 +71,11 @@ struct App {
     float summaryExpandAnim = 0.0f;
     bool summaryHeaderHovered = false;
     float summaryHeaderX = 0, summaryHeaderY = 0, summaryHeaderW = 0, summaryHeaderH = 0;
+
+    // Summary range selector (visible when expanded)
+    SummaryRange summaryRange = SummaryRange::Today;
+    float rangeLeftX = 0, rangeLeftY = 0, rangeLeftW = 0, rangeLeftH = 0;
+    float rangeRightX = 0, rangeRightY = 0, rangeRightW = 0, rangeRightH = 0;
 
     // UI layout constants
     static constexpr float PADDING = 16.0f;
