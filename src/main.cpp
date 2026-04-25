@@ -36,6 +36,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
+#include <X11/Xresource.h>
 #include <X11/extensions/sync.h>
 #include <X11/keysym.h>
 #include <EGL/egl.h>
@@ -1291,10 +1292,49 @@ int run_wayland() {
 
 #ifdef HAVE_X11
 
+// Resolve a HiDPI scale factor from environment + X resources. Ladder:
+//   1. GDK_SCALE        (integer, GTK convention)
+//   2. QT_SCALE_FACTOR  (float, Qt convention; rounded to nearest int)
+//   3. Xft.dpi          (X resource; scale = round(dpi/96), clamped to [1,4])
+// Defaults to 1 when nothing is set. Always rounds to an integer so glyph
+// rendering stays crisp; fractional scaling produces blurry text.
+static int x11_resolve_scale(Display* display) {
+    if (const char* s = std::getenv("GDK_SCALE")) {
+        int n = std::atoi(s);
+        if (n >= 1 && n <= 4) return n;
+    }
+    if (const char* s = std::getenv("QT_SCALE_FACTOR")) {
+        double f = std::atof(s);
+        int n = (int)(f + 0.5);
+        if (n >= 1 && n <= 4) return n;
+    }
+    char* res = XResourceManagerString(display);
+    if (res && *res) {
+        XrmInitialize();
+        XrmDatabase db = XrmGetStringDatabase(res);
+        if (db) {
+            char* type = nullptr;
+            XrmValue val = {};
+            if (XrmGetResource(db, "Xft.dpi", "Xft.Dpi", &type, &val) && val.addr) {
+                double dpi = std::atof(val.addr);
+                XrmDestroyDatabase(db);
+                int n = (int)((dpi / 96.0) + 0.5);
+                if (n < 1) n = 1;
+                if (n > 4) n = 4;
+                return n;
+            }
+            XrmDestroyDatabase(db);
+        }
+    }
+    return 1;
+}
+
 int run_x11() {
     Display* dpy = XOpenDisplay(nullptr);
     if (!dpy) return -1;
     std::fprintf(stderr, "Using X11 backend\n");
+
+    const int x11_scale = x11_resolve_scale(dpy);
 
     EGLDisplay egl_dpy = eglGetDisplay(reinterpret_cast<EGLNativeDisplayType>(dpy));
     if (egl_dpy == EGL_NO_DISPLAY || !eglInitialize(egl_dpy, nullptr, nullptr)) {
@@ -1324,7 +1364,7 @@ int run_x11() {
     swa.event_mask = StructureNotifyMask | ExposureMask | ButtonPressMask | ButtonReleaseMask |
                      PointerMotionMask | KeyPressMask | KeyReleaseMask | FocusChangeMask;
 
-    int width = 520, height = 640;
+    int width = 520 * x11_scale, height = 640 * x11_scale;
     Window win = XCreateWindow(dpy, RootWindow(dpy, screen), 0, 0, width, height, 0,
                                vi->depth, InputOutput, vi->visual, CWColormap | CWEventMask, &swa);
     XFree(vi);
@@ -1336,11 +1376,11 @@ int run_x11() {
     classHint.res_class = (char*)"tt";
     XSetClassHint(dpy, win, &classHint);
 
-    // Min size hints
+    // Min size hints (in physical pixels, so multiply by scale)
     XSizeHints hints{};
     hints.flags = PMinSize;
-    hints.min_width = 320;
-    hints.min_height = 560;
+    hints.min_width = 320 * x11_scale;
+    hints.min_height = 560 * x11_scale;
     XSetWMNormalHints(dpy, win, &hints);
 
     Atom wm_protocols_atom = XInternAtom(dpy, "WM_PROTOCOLS", False);
@@ -1419,7 +1459,7 @@ int run_x11() {
                 break;
             case ButtonPress:
                 g_app.mouseDown = true;
-                g_app.OnClick((double)ev.xbutton.x, (double)ev.xbutton.y);
+                g_app.OnClick((double)ev.xbutton.x / x11_scale, (double)ev.xbutton.y / x11_scale);
                 x11_dirty = true;
                 break;
             case ButtonRelease:
@@ -1427,7 +1467,8 @@ int run_x11() {
                 x11_dirty = true;
                 break;
             case MotionNotify:
-                g_app.mx = (double)ev.xmotion.x; g_app.my = (double)ev.xmotion.y;
+                g_app.mx = (double)ev.xmotion.x / x11_scale;
+                g_app.my = (double)ev.xmotion.y / x11_scale;
                 x11_dirty = true;
                 break;
             case KeyPress: {
@@ -1510,9 +1551,9 @@ int run_x11() {
             eglQuerySurface(egl_dpy, egl_srf, EGL_WIDTH, &srf_w);
             eglQuerySurface(egl_dpy, egl_srf, EGL_HEIGHT, &srf_h);
 
-            g_app.winW = srf_w; g_app.winH = srf_h;
+            g_app.winW = srf_w / x11_scale; g_app.winH = srf_h / x11_scale;
             g_app.bufW = srf_w; g_app.bufH = srf_h;
-            g_app.scale = 1;
+            g_app.scale = x11_scale;
             g_app.Paint();
 
             eglSwapBuffers(egl_dpy, egl_srf);
