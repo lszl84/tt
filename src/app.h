@@ -122,12 +122,12 @@ struct App {
     float LineH() const { return fontManager.LineHeight() / scale; }
     float AscH() const { return fontManager.Ascent() / scale; }
 
-    // Re-initialize font when scale changes
+    // Update font size when display scale changes
     int lastFontScale = 0;
     void CheckFontScale() {
         if (lastFontScale != scale) {
             lastFontScale = scale;
-            fontManager.Init(18 * scale);
+            fontManager.SetSize(16 * scale);
         }
     }
 };

@@ -357,10 +357,11 @@ void App::Paint() {
         float titleW = renderer.MeasureText(headerText);
         float hintX = P + 14 + titleW + 12;
         float titleCenter = headerTextY + LineH() * 0.5f;
+        int oldSize = fontManager.CurrentSize();
         fontManager.SetSize(12 * scale);
         float hintY = titleCenter - (fontManager.LineHeight() / scale) * 0.5f;
         renderer.DrawText(hint, hintX, hintY, Color(0.35f, 0.38f, 0.45f, 1.0f));
-        fontManager.SetSize(16 * scale);
+        fontManager.SetSize(oldSize);
     }
 
     float sumTextY = summaryY + headerH;
