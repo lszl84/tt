@@ -278,8 +278,8 @@ struct WaylandApp {
     int min_width  = 320;
     int min_height = 560;
 
-    int width          = 520;
-    int height         = 640;
+    int width          = 320;
+    int height         = 560;
     int pending_width  = 0;
     int pending_height = 0;
 
@@ -546,8 +546,6 @@ void wl_render_app(WaylandApp& app) {
     glUseProgram(0);
 }
 
-void wl_commit_frame(WaylandApp& app);
-
 void frame_done(void* data, wl_callback* cb, uint32_t) {
     wl_callback_destroy(cb);
     auto& app = *static_cast<WaylandApp*>(data);
@@ -595,9 +593,7 @@ void wl_sync_surface_geometry(WaylandApp& app) {
     }
 }
 
-void wl_commit_frame(WaylandApp& app) {
-    if (!app.egl_ready || !app.dirty || app.frame_pending) return;
-
+void wl_apply_pending_and_resize(WaylandApp& app) {
     if (app.pending_width > 0 && app.pending_height > 0) {
         app.width  = app.pending_width;
         app.height = app.pending_height;
@@ -608,11 +604,19 @@ void wl_commit_frame(WaylandApp& app) {
     const int want_w = (app.width  + 2 * sh) * app.scale;
     const int want_h = (app.height + 2 * sh) * app.scale;
     if (want_w != app.applied_buffer_w || want_h != app.applied_buffer_h) {
-        wl_egl_window_resize(app.egl_window, want_w, want_h, 0, 0);
+        if (app.egl_window) {
+            wl_egl_window_resize(app.egl_window, want_w, want_h, 0, 0);
+        }
         app.applied_buffer_w = want_w;
         app.applied_buffer_h = want_h;
         wl_sync_surface_geometry(app);
     }
+}
+
+void wl_commit_frame(WaylandApp& app) {
+    if (!app.egl_ready || !app.dirty || app.frame_pending) return;
+
+    wl_apply_pending_and_resize(app);
 
     if (app.use_csd) {
         const float target = app.hover_close ? 1.0f : 0.0f;
@@ -652,6 +656,7 @@ void wl_commit_frame(WaylandApp& app) {
 void xdg_surface_configure(void* data, xdg_surface* s, uint32_t serial) {
     auto& app = *static_cast<WaylandApp*>(data);
     xdg_surface_ack_configure(s, serial);
+    if (app.egl_ready) wl_apply_pending_and_resize(app);
     app.dirty = true;
     if (app.egl_ready && !app.frame_pending) wl_commit_frame(app);
 }
@@ -665,6 +670,7 @@ void surface_preferred_buffer_scale(void* data, wl_surface*, int32_t factor) {
     app.compositor_max_scale = factor;
     wl_surface_set_buffer_scale(app.surface, factor);
     app.applied_buffer_w = 0; app.applied_buffer_h = 0;
+    if (app.egl_ready) wl_apply_pending_and_resize(app);
     app.dirty = true;
     if (app.egl_ready && !app.frame_pending) wl_commit_frame(app);
 }
@@ -716,6 +722,7 @@ void toplevel_decoration_configure(void* data, zxdg_toplevel_decoration_v1*, uin
     app.use_csd = (mode != ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
     if (was_csd != app.use_csd) {
         app.applied_buffer_w = 0; app.applied_buffer_h = 0;
+        if (app.egl_ready) wl_apply_pending_and_resize(app);
         app.dirty = true;
         if (app.egl_ready && !app.frame_pending) wl_commit_frame(app);
     }
@@ -815,7 +822,7 @@ void pointer_enter(void* data, wl_pointer*, uint32_t serial,
     app.px = wl_fixed_to_double(sx) - o;
     app.py = wl_fixed_to_double(sy) - o;
     g_app.mx = app.px;
-    g_app.my = (app.py > TITLEBAR_H) ? app.py - TITLEBAR_H : app.py;
+    g_app.my = app.use_csd ? ((app.py >= TITLEBAR_H) ? app.py - TITLEBAR_H : -1000.0) : app.py;
     update_hover(app);
 }
 void pointer_leave(void* data, wl_pointer*, uint32_t, wl_surface*) {
@@ -823,15 +830,15 @@ void pointer_leave(void* data, wl_pointer*, uint32_t, wl_surface*) {
     if (app.hover_close) { app.hover_close = false; app.dirty = true;
         if (!app.frame_pending) wl_commit_frame(app);
     }
+    g_app.mx = -1000.0; g_app.my = -1000.0;
 }
 void pointer_motion(void* data, wl_pointer*, uint32_t, wl_fixed_t sx, wl_fixed_t sy) {
     auto& app = *static_cast<WaylandApp*>(data);
     const double o = double(wl_eff_shadow(app));
     app.px = wl_fixed_to_double(sx) - o;
     app.py = wl_fixed_to_double(sy) - o;
-    // Pass content-relative coords to app (subtract titlebar when in content area)
     g_app.mx = app.px;
-    g_app.my = (app.py > TITLEBAR_H) ? app.py - TITLEBAR_H : app.py;
+    g_app.my = app.use_csd ? ((app.py >= TITLEBAR_H) ? app.py - TITLEBAR_H : -1000.0) : app.py;
     update_hover(app);
     app.dirty = true;   // content button hovers need a repaint
 }
@@ -847,8 +854,9 @@ void pointer_button(void* data, wl_pointer*, uint32_t serial, uint32_t,
         if (!app.use_csd) return;
         // Right-click on title bar: ask compositor to show window menu
         if (app.py < TITLEBAR_H && !in_close(app, app.px, app.py)) {
+            const int sh = wl_eff_shadow(app);
             xdg_toplevel_show_window_menu(app.toplevel, app.seat, serial,
-                                          (int32_t)app.px, (int32_t)app.py);
+                                          (int32_t)(app.px + sh), (int32_t)(app.py + sh));
         }
         return;
     }
@@ -1157,7 +1165,10 @@ bool wl_init_egl(WaylandApp& app) {
     app.egl_context = eglCreateContext(app.egl_display, app.egl_config, EGL_NO_CONTEXT, ctx_attrs);
     if (app.egl_context == EGL_NO_CONTEXT) return false;
 
-    app.egl_window = wl_egl_window_create(app.surface, app.width, app.height);
+    const int init_sh = wl_eff_shadow(app);
+    const int init_w  = (app.width  + 2 * init_sh) * app.scale;
+    const int init_h  = (app.height + 2 * init_sh) * app.scale;
+    app.egl_window = wl_egl_window_create(app.surface, init_w, init_h);
     app.egl_surface = eglCreateWindowSurface(app.egl_display, app.egl_config,
         reinterpret_cast<EGLNativeWindowType>(app.egl_window), nullptr);
     if (app.egl_surface == EGL_NO_SURFACE) return false;
