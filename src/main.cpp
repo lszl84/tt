@@ -57,6 +57,7 @@
 #include <vector>
 
 #include "app.h"
+#include "sync.h"
 
 namespace {
 
@@ -1246,8 +1247,21 @@ int run_wayland() {
 
         if (wl_display_flush(app.display) == -1) break;
 
+        // Push title changes to the compositor whenever App's desired title
+        // (driven by sync status) drifts from what we last set.
+        static std::string last_title_wl;
+        if (g_app.desiredTitle != last_title_wl) {
+            xdg_toplevel_set_title(app.toplevel, g_app.desiredTitle.c_str());
+            last_title_wl = g_app.desiredTitle;
+        }
+
         int fd = wl_display_get_fd(app.display);
-        struct pollfd pfd = { fd, POLLIN, 0 };
+        int sync_fd = GetSyncManager().WakeupFd();
+        struct pollfd pfds[2] = {
+            { fd, POLLIN, 0 },
+            { sync_fd, POLLIN, 0 },
+        };
+        int npfds = (sync_fd >= 0) ? 2 : 1;
 
         int timeout_ms = -1;
         if (g_app.activeTask >= 0 || g_app.inputFocused) {
@@ -1269,16 +1283,23 @@ int run_wayland() {
         }
         if (wl_display_prepare_read(app.display) != 0) continue;
 
-        int ret = poll(&pfd, 1, timeout_ms);
+        int ret = poll(pfds, npfds, timeout_ms);
         if (ret < 0) {
             wl_display_cancel_read(app.display);
             if (errno == EINTR) continue;
             break;
         }
-        if (ret > 0 && (pfd.revents & POLLIN)) {
+        if (ret > 0 && (pfds[0].revents & POLLIN)) {
             if (wl_display_read_events(app.display) == -1) break;
         } else {
             wl_display_cancel_read(app.display);
+            app.dirty = true;
+        }
+        // Drain sync wakeup byte(s); presence is enough — actual data is read
+        // from SyncManager::TryConsumePulled() inside App::Paint().
+        if (npfds > 1 && (pfds[1].revents & POLLIN)) {
+            char buf[64];
+            while (read(sync_fd, buf, sizeof(buf)) > 0) {}
             app.dirty = true;
         }
     }
@@ -1596,8 +1617,25 @@ int run_x11() {
             timeout_ms = std::max(0, timeout_ms);
         }
 
-        struct pollfd pfd{ x_fd, POLLIN, 0 };
-        poll(&pfd, 1, timeout_ms);
+        // Apply title changes from sync state.
+        static std::string last_title_x11;
+        if (g_app.desiredTitle != last_title_x11) {
+            XStoreName(dpy, win, g_app.desiredTitle.c_str());
+            last_title_x11 = g_app.desiredTitle;
+        }
+
+        int sync_fd = GetSyncManager().WakeupFd();
+        struct pollfd pfds[2] = {
+            { x_fd, POLLIN, 0 },
+            { sync_fd, POLLIN, 0 },
+        };
+        int npfds = (sync_fd >= 0) ? 2 : 1;
+        poll(pfds, npfds, timeout_ms);
+        if (npfds > 1 && (pfds[1].revents & POLLIN)) {
+            char buf[64];
+            while (read(sync_fd, buf, sizeof(buf)) > 0) {}
+            x11_dirty = true;
+        }
     }
 
     if (have_sync) {

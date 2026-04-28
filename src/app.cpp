@@ -1,5 +1,6 @@
 #include "app.h"
 #include "data.h"
+#include "sync.h"
 #include <algorithm>
 #include <ctime>
 #include <cstdio>
@@ -85,14 +86,83 @@ void App::Init() {
     }
     glReady = true;
 
-    if (!LoadState(*this)) {
-        // Fallback defaults
-        tasks.push_back({"Development", false, {}, 0});
-        tasks.push_back({"Code Review", false, {}, 0});
-        tasks.push_back({"Meetings", false, {}, 0});
-        tasks.push_back({"Planning", false, {}, 0});
+    bool loaded = LoadState(*this);
+
+    // Start sync first so we know whether a remote exists. If we have neither
+    // local data nor sync, seed the list with defaults so the user has
+    // something to work with. If sync is available, leave the list empty —
+    // the first pull will populate it (or stay empty if remote is also empty).
+    GetSyncManager().Start(*this);
+    bool syncAvailable = GetSyncManager().GetStatus() != SyncManager::State::Idle;
+
+    if (!loaded && !syncAvailable) {
+        for (const char* n : {"Development", "Code Review", "Meetings", "Planning"}) {
+            Task t;
+            t.id = GenerateUuid();
+            t.name = n;
+            tasks.push_back(std::move(t));
+        }
     }
     if (!tasks.empty() && selectedTask < 0) selectedTask = 0;
+
+    // If we have local data and sync is available, seed an initial push. The
+    // worker defers the push until its first pull completes, so a non-empty
+    // remote is merged before we push anything (avoiding clobber).
+    if (syncAvailable && !tasks.empty()) {
+        NotifySyncOfChange();
+    }
+}
+
+int App::FindTaskById(const std::string& id) const {
+    for (size_t i = 0; i < tasks.size(); ++i)
+        if (tasks[i].id == id) return (int)i;
+    return -1;
+}
+
+void App::NotifySyncOfChange() {
+    GetSyncManager().RequestPush(SerializeStateToJson(*this));
+}
+
+void App::IngestRemoteJson(const std::string& json) {
+    bool changed = MergeRemoteJson(*this, json);
+    if (changed) {
+        // Persist the merged state immediately so subsequent reads see it.
+        Save();
+        // Surface "merged from another device" indicator and push the merged
+        // result back so other machines converge on what we just learned.
+        syncStatus = SyncStatus::Merged;
+        syncStatusSince = std::chrono::steady_clock::now();
+        GetSyncManager().RequestPush(SerializeStateToJson(*this));
+    } else if (syncStatus == SyncStatus::Offline) {
+        syncStatus = SyncStatus::OK;
+        syncStatusSince = std::chrono::steady_clock::now();
+    }
+}
+
+void App::PumpSync() {
+    auto& mgr = GetSyncManager();
+    std::string remote;
+    while (mgr.TryConsumePulled(remote)) {
+        IngestRemoteJson(remote);
+    }
+    auto stat = mgr.GetStatus();
+    SyncStatus mapped = syncStatus;
+    using S = SyncManager::State;
+    switch (stat) {
+        case S::Idle:    mapped = SyncStatus::Idle; break;
+        case S::OK:      mapped = SyncStatus::OK; break;
+        case S::Offline: mapped = SyncStatus::Offline; break;
+        case S::Syncing: /* keep prior */ break;
+    }
+    // Only overwrite Merged with a positive update when it has been visible long enough.
+    if (syncStatus == SyncStatus::Merged) {
+        auto since = std::chrono::steady_clock::now() - syncStatusSince;
+        if (since < std::chrono::seconds(8)) return;
+    }
+    if (mapped != syncStatus) {
+        syncStatus = mapped;
+        syncStatusSince = std::chrono::steady_clock::now();
+    }
 }
 
 void App::Save() {
@@ -119,8 +189,10 @@ double App::GetTaskTime(int idx) const {
     if (idx < 0 || idx >= (int)tasks.size()) return 0;
     auto [rangeStart, rangeEnd] = GetRangeBounds(summaryRange);
     double total = 0;
+    const std::string& tid = tasks[idx].id;
     for (const auto& s : sessions) {
-        if (s.taskName == tasks[idx].name && s.start >= rangeStart && s.start < rangeEnd)
+        if (s.end == 0) continue; // active sessions are accounted for below
+        if (s.taskId == tid && s.start >= rangeStart && s.start < rangeEnd)
             total += s.seconds;
     }
     if (tasks[idx].active) {
@@ -141,37 +213,91 @@ double App::GetTaskTime(int idx) const {
 
 void App::AddTask(const std::string& name) {
     if (name.empty()) return;
-    tasks.push_back({name, false, {}, 0});
+    Task t;
+    t.id = GenerateUuid();
+    t.name = name;
+    tasks.push_back(std::move(t));
     if (selectedTask < 0) selectedTask = (int)tasks.size() - 1;
+    Save();
+    NotifySyncOfChange();
+}
+
+// Stop the active session for a task: locate the open session entry and fill
+// in its end time. If the open session was lost (shouldn't happen) fall back to
+// constructing a fresh one from the task's wallStart.
+void App::StopTask(int idx) {
+    if (idx < 0 || idx >= (int)tasks.size()) return;
+    Task& t = tasks[idx];
+    if (!t.active) return;
+
+    auto now_steady = std::chrono::steady_clock::now();
+    auto now_wall = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    double elapsed = std::chrono::duration<double>(now_steady - t.steadyStart).count();
+
+    bool found = false;
+    if (!t.activeSessionId.empty()) {
+        for (auto& s : sessions) {
+            if (s.id == t.activeSessionId) {
+                s.end = now_wall;
+                s.seconds = std::max(0.0, std::difftime(s.end, s.start));
+                found = true;
+                break;
+            }
+        }
+    }
+    if (!found) {
+        TimeSession s;
+        s.id = GenerateUuid();
+        s.taskId = t.id;
+        s.start = t.wallStart != 0 ? t.wallStart : (now_wall - (std::time_t)elapsed);
+        s.end = now_wall;
+        s.seconds = std::max(0.0, std::difftime(s.end, s.start));
+        sessions.push_back(std::move(s));
+    }
+    t.active = false;
+    t.activeSessionId.clear();
+    t.wallStart = 0;
+    if (activeTask == idx) activeTask = -1;
+}
+
+// Start tracking a task: append a fresh session with end=0 and bind it to the
+// task's runtime active state.
+void App::StartTask(int idx) {
+    if (idx < 0 || idx >= (int)tasks.size()) return;
+    Task& t = tasks[idx];
+    if (t.active) return;
+
+    auto now_wall = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    TimeSession s;
+    s.id = GenerateUuid();
+    s.taskId = t.id;
+    s.start = now_wall;
+    s.end = 0;
+    s.seconds = 0;
+    sessions.push_back(std::move(s));
+
+    t.active = true;
+    t.steadyStart = std::chrono::steady_clock::now();
+    t.wallStart = now_wall;
+    t.activeSessionId = sessions.back().id;
+    activeTask = idx;
 }
 
 void App::ToggleTimer() {
     if (selectedTask < 0 || selectedTask >= (int)tasks.size()) return;
 
-    // If another task is active, stop it first
     if (activeTask >= 0 && activeTask != selectedTask && tasks[activeTask].active) {
-        auto now_steady = std::chrono::steady_clock::now();
-        auto now_wall = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        double elapsed = std::chrono::duration<double>(now_steady - tasks[activeTask].steadyStart).count();
-        sessions.push_back({tasks[activeTask].name, tasks[activeTask].wallStart, now_wall, elapsed});
-        tasks[activeTask].active = false;
+        StopTask(activeTask);
     }
 
     if (tasks[selectedTask].active) {
-        // Stop
-        auto now_steady = std::chrono::steady_clock::now();
-        auto now_wall = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        double elapsed = std::chrono::duration<double>(now_steady - tasks[selectedTask].steadyStart).count();
-        sessions.push_back({tasks[selectedTask].name, tasks[selectedTask].wallStart, now_wall, elapsed});
-        tasks[selectedTask].active = false;
-        activeTask = -1;
+        StopTask(selectedTask);
     } else {
-        // Start
-        tasks[selectedTask].active = true;
-        tasks[selectedTask].steadyStart = std::chrono::steady_clock::now();
-        tasks[selectedTask].wallStart = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        activeTask = selectedTask;
+        StartTask(selectedTask);
     }
+
+    Save();
+    NotifySyncOfChange();
 }
 
 void App::Paint() {
@@ -179,6 +305,20 @@ void App::Paint() {
 
     // Snapshot time once per frame so every timer display is perfectly in sync
     frameNow = std::chrono::steady_clock::now();
+
+    // Drain any pending sync results (merged remote state, status updates).
+    PumpSync();
+
+    // Compute desired title each frame; platform layers diff and apply.
+    {
+        std::string base = "Time Tracker";
+        switch (syncStatus) {
+            case SyncStatus::Idle:    desiredTitle = base; break;
+            case SyncStatus::OK:      desiredTitle = base; break;
+            case SyncStatus::Offline: desiredTitle = base + " — offline"; break;
+            case SyncStatus::Merged:  desiredTitle = base + " — synced from other device"; break;
+        }
+    }
 
     // Auto-save every 30 seconds
     if (std::chrono::duration_cast<std::chrono::seconds>(frameNow - lastSaveTime).count() >= 30) {

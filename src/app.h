@@ -11,16 +11,19 @@
 // ============================================================================
 
 struct Task {
+    std::string id;            // stable UUID, persisted
     std::string name;
     bool active = false;
     std::chrono::steady_clock::time_point steadyStart;
     std::time_t wallStart = 0;
+    std::string activeSessionId; // id of the open session driving this task
 };
 
 struct TimeSession {
-    std::string taskName;
+    std::string id;            // stable UUID, persisted
+    std::string taskId;        // foreign key to Task.id
     std::time_t start = 0;
-    std::time_t end = 0;
+    std::time_t end = 0;        // 0 == open / active session
     double seconds = 0;
 };
 
@@ -62,6 +65,15 @@ struct App {
 
     // Auto-save
     std::chrono::steady_clock::time_point lastSaveTime = std::chrono::steady_clock::now();
+
+    // Sync status — used for titlebar indicator. Set by sync code, read by main loop.
+    enum class SyncStatus { Idle, OK, Offline, Merged };
+    SyncStatus syncStatus = SyncStatus::Idle;
+    std::chrono::steady_clock::time_point syncStatusSince{};
+    std::string syncBackendDescription;
+    // Computed each frame from sync status. Platform layers compare with their
+    // last-applied value and update the window title if changed.
+    std::string desiredTitle = "Time Tracker";
 
     // Frame-consistent time sampling (so task times and totals never drift mid-frame)
     std::chrono::steady_clock::time_point frameNow = std::chrono::steady_clock::now();
@@ -108,10 +120,22 @@ struct App {
     void OnKey(uint32_t key, uint32_t mods);
     void OnChar(uint32_t codepoint);
     void ToggleTimer();
+    void StartTask(int idx);
+    void StopTask(int idx);
     void AddTask(const std::string& name);
     double GetTaskTime(int idx) const;
     std::string FormatTime(double seconds) const;
     void Save();
+
+    // Look up task index by id; -1 if not found.
+    int FindTaskById(const std::string& id) const;
+
+    // Push current state to sync backend (if any). Best-effort; non-blocking.
+    void NotifySyncOfChange();
+    // Apply merged state from sync; called on main thread.
+    void IngestRemoteJson(const std::string& json);
+    // Pump the sync manager: should be called every frame.
+    void PumpSync();
 
     bool IsAnimating() const {
         float target = summaryExpanded ? 1.0f : 0.0f;

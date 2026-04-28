@@ -20,6 +20,7 @@ set(TT_SOURCES
     src/renderer.cpp
     src/app.cpp
     src/data.cpp
+    src/sync.cpp
 )
 
 set(HAVE_WAYLAND FALSE)
@@ -186,6 +187,9 @@ else()
         target_link_libraries(tt PRIVATE PkgConfig::X11 PkgConfig::XEXT)
     endif()
 endif()
+
+find_package(Threads REQUIRED)
+target_link_libraries(tt PRIVATE Threads::Threads)
 
 target_compile_options(tt PRIVATE
     -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)

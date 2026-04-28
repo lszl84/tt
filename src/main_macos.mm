@@ -17,6 +17,7 @@
 #include <cstdint>
 
 #include "app.h"
+#include "sync.h"
 
 namespace {
 
@@ -127,6 +128,15 @@ uint32_t MapKey(unsigned short vk) {
         auto ms      = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         auto last_ms = std::chrono::duration_cast<std::chrono::milliseconds>(_lastPaint.time_since_epoch()).count();
         if ((ms / 500) != (last_ms / 500)) redraw = true;
+    }
+    // Drain sync events so the title indicator and merged state stay current
+    // even when otherwise idle.
+    _app->PumpSync();
+
+    NSWindow* w = [self window];
+    NSString* desired = [NSString stringWithUTF8String:_app->desiredTitle.c_str()];
+    if (![[w title] isEqualToString:desired]) {
+        [w setTitle:desired];
     }
     if (redraw) [self setNeedsDisplay:YES];
 }
