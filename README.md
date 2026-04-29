@@ -21,6 +21,38 @@ A minimal, native time-tracking application with custom OpenGL rendering, client
 | xkbcommon | Keyboard input (Wayland) |
 | X11, XSync | X11 backend (fallback) |
 
+### Fedora
+
+```bash
+sudo dnf install cmake gcc-c++ pkgconf-pkg-config \
+  mesa-libEGL-devel mesa-libGL-devel \
+  freetype-devel harfbuzz-devel fontconfig-devel \
+  wayland-devel wayland-protocols-devel libxkbcommon-devel \
+  libX11-devel libXext-devel
+```
+
+### Arch Linux
+
+```bash
+sudo pacman -S cmake gcc pkgconf \
+  mesa \
+  freetype2 harfbuzz fontconfig \
+  wayland wayland-protocols libxkbcommon \
+  libx11 libxext
+```
+
+### Debian / Ubuntu
+
+```bash
+sudo apt install cmake g++ pkg-config \
+  libegl1-mesa-dev libgl1-mesa-dev \
+  libfreetype6-dev libharfbuzz-dev libfontconfig1-dev \
+  libwayland-dev wayland-protocols libxkbcommon-dev \
+  libx11-dev libxext-dev
+```
+
+Both Wayland and X11 backends are optional — install only what you need. The build will auto-detect which are available.
+
 ## Build
 
 ```bash
