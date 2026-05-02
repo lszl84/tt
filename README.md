@@ -1,57 +1,39 @@
 # tt — Time Tracker
 
-A minimal, native time-tracking application with custom OpenGL rendering, client-side decorations, and HiDPI support.
+A minimal time-tracking app, built on wxWidgets.
 
 ## Features
 
-- **Native Wayland backend** with client-side decorations (CSD): custom title bar, close button, resize handles, shadow, and rounded corners
-- **X11 fallback backend** with `_NET_WM_SYNC_REQUEST` for smooth resizing
-- **HiDPI support** — queries compositor output scale (Wayland) and renders at full resolution
-- **Custom OpenGL 3.3 renderer** — batched quads, rounded-rect SDF, font atlas with HarfBuzz shaping
-- **Time tracking** — add tasks, start/stop timer, daily summary with per-task breakdown
+- Add tasks, start/stop a timer with one click
+- Daily / weekly / two-week summary panel with previous-period navigation
+- State persisted as JSON in `$XDG_DATA_HOME/tt/state.json` (override via `$TT_DATA_DIR`)
 
 ## Dependencies
 
-| Library | Purpose |
-|---------|---------|
-| EGL / OpenGL 3.3 | Rendering |
-| FreeType + HarfBuzz | Font rendering & text shaping |
-| Fontconfig | Font discovery |
-| wayland-client, wayland-egl, wayland-cursor | Wayland backend |
-| xkbcommon | Keyboard input (Wayland) |
-| X11, XSync | X11 backend (fallback) |
+- A C++20 compiler and CMake ≥ 3.28
+- wxWidgets ≥ 3.2 (system package, or auto-fetched and built from source)
+- nlohmann/json (auto-fetched)
 
 ### Fedora
 
 ```bash
-sudo dnf install cmake gcc-c++ pkgconf-pkg-config \
-  mesa-libEGL-devel mesa-libGL-devel \
-  freetype-devel harfbuzz-devel fontconfig-devel \
-  wayland-devel wayland-protocols-devel libxkbcommon-devel \
-  libX11-devel libXext-devel
+sudo dnf install cmake gcc-c++ wxGTK-devel
 ```
 
 ### Arch Linux
 
 ```bash
-sudo pacman -S cmake gcc pkgconf \
-  mesa \
-  freetype2 harfbuzz fontconfig \
-  wayland wayland-protocols libxkbcommon \
-  libx11 libxext
+sudo pacman -S cmake gcc wxwidgets-gtk3
 ```
 
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install cmake g++ pkg-config \
-  libegl1-mesa-dev libgl1-mesa-dev \
-  libfreetype6-dev libharfbuzz-dev libfontconfig1-dev \
-  libwayland-dev wayland-protocols libxkbcommon-dev \
-  libx11-dev libxext-dev
+sudo apt install cmake g++ libwxgtk3.2-dev
 ```
 
-Both Wayland and X11 backends are optional — install only what you need. The build will auto-detect which are available.
+If wxWidgets isn't installed, CMake will fetch and build it from source via
+`FetchContent` — no extra step required, just a longer first build.
 
 ## Build
 
@@ -59,32 +41,24 @@ Both Wayland and X11 backends are optional — install only what you need. The b
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
-```
-
-The Wayland backend is auto-detected. The X11 backend is used as a fallback if `WAYLAND_DISPLAY` is not set.
-
-## Usage
-
-```bash
 ./tt
 ```
 
+## Usage
+
 - Type a task name and press **Enter** or click **+ Add**
 - Click a task to select it
-- Click **▶ Start** to begin tracking (click **■ Stop** to stop)
-- The daily summary panel shows time breakdowns
+- Click **Start** to begin tracking; click **Stop** (or **Space**) to stop
+- The summary panel shows totals for the chosen range; **<** / **>** cycle ranges
 
 ## Architecture
 
 ```
 src/
-  main.cpp      — Platform layer (Wayland + X11 backends, EGL, event loop)
-  app.h/cpp     — Application logic, layout, input handling
-  renderer.h/cpp — OpenGL batch renderer (quads, rounded rects, text)
-  font.h/cpp    — Font management (FreeType + HarfBuzz, glyph atlas)
+  main.cpp       — wxApp entry
+  tt_frame.h/.cpp — main window: input, task list, toggle, summary panel
+  data.h/.cpp     — Task / TimeSession model and JSON persistence
 ```
-
-The platform layer creates the window, manages the GL context, and drives the frame loop. The app layer is backend-agnostic — it only sees logical-pixel coordinates and calls `Paint()` / `OnClick()` / `OnKey()`.
 
 ## License
 

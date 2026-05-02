@@ -1,35 +1,69 @@
 #pragma once
 
-#include <filesystem>
+#include <chrono>
 #include <ctime>
+#include <filesystem>
 #include <string>
+#include <utility>
+#include <vector>
 
-class App;
+struct Task {
+    std::string id;            // stable UUID, persisted
+    std::string name;
+    bool active = false;
+    std::chrono::steady_clock::time_point steadyStart;
+    std::time_t wallStart = 0;
+    std::string activeSessionId; // id of the open session driving this task
+};
 
-// Returns the directory where state.json lives. Honors $TT_DATA_DIR if set.
-std::filesystem::path GetDataDir();
+struct TimeSession {
+    std::string id;            // stable UUID, persisted
+    std::string taskId;        // foreign key to Task.id
+    std::time_t start = 0;
+    std::time_t end = 0;        // 0 == open / active session
+    double seconds = 0;
+};
+
+enum class SummaryRange : int {
+    Today = 0,
+    ThisWeek,
+    TwoWeeks,
+    PrevWeek,
+    PrevTwoWeeks,
+    Count
+};
+
+struct TTState {
+    std::vector<Task> tasks;
+    std::vector<TimeSession> sessions;
+    int activeTask = -1;
+};
+
+// On-disk path. Honors $TT_DATA_DIR.
 std::filesystem::path GetDataPath();
 
-// Disk I/O.
-bool LoadState(App& app);
-bool SaveState(const App& app);
+// Load / save state.json (version 3). Returns false if no usable file exists.
+bool LoadState(TTState& state);
+bool SaveState(const TTState& state);
 
-// Pure serialize: produce v3 JSON string from current app state.
-// Used both by SaveState (to disk) and by the sync layer (to push remote).
-std::string SerializeStateToJson(const App& app);
-
-// Atomically write a JSON string to a path (write tmp then rename).
-bool WriteFileAtomic(const std::filesystem::path& path, const std::string& contents);
-
-// Merge a JSON snapshot from another machine into the current app state.
-// Returns true if anything actually changed locally (i.e., we have new info).
-// Safe to call on main thread; mutates app.tasks / app.sessions / active state.
-bool MergeRemoteJson(App& app, const std::string& json);
-
-// Time helpers.
-std::time_t TodayMidnight();
-std::string FormatISO(std::time_t t);
-std::time_t ParseISO(const std::string& s);
-
-// Generate a random UUID-like string (8-4-4-4-12 hex).
+// Random RFC4122-ish UUID.
 std::string GenerateUuid();
+
+// Format a duration in seconds as "1h 02m 03s" / "2m 03s" / "12s".
+std::string FormatDuration(double seconds);
+
+// [start, end) wall-clock range covered by a SummaryRange option.
+std::pair<std::time_t, std::time_t> GetRangeBounds(SummaryRange r);
+const char* RangeLabel(SummaryRange r);
+const char* RangeHeader(SummaryRange r);
+
+// Total tracked time for one task within `range`. Counts open sessions up to
+// `now` so the active row updates live.
+double GetTaskTime(const TTState& state, int idx, SummaryRange range,
+                   std::chrono::steady_clock::time_point now);
+
+// Mutators. Caller is responsible for persisting after.
+void StartTask(TTState& state, int idx);
+void StopTask(TTState& state, int idx);
+
+int FindTaskById(const TTState& state, const std::string& id);
