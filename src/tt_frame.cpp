@@ -21,6 +21,15 @@ TTFrame::TTFrame()
       ticker_(this) {
 
     LoadState(state_);
+    if (state_.tasks.empty()) {
+        for (const char* n : {"Development", "Code Review", "Meetings", "Planning"}) {
+            Task t;
+            t.id = GenerateUuid();
+            t.name = n;
+            state_.tasks.push_back(std::move(t));
+        }
+        SaveState(state_);
+    }
 
     BuildLayout();
     RefreshTaskList();
@@ -47,12 +56,21 @@ TTFrame::TTFrame()
     });
 
     if (taskList_->GetItemCount() > 0) {
-        taskList_->SelectRow(0);
+        int sel = (state_.activeTask >= 0) ? state_.activeTask : 0;
+        taskList_->SelectRow(sel);
     }
+    RefreshToggleButton();
 
     ticker_.Start(kTickerMs);
     SetMinSize(wxSize(420, 480));
     input_->SetFocus();
+
+    // After the frame has settled at its final size, fit columns once more —
+    // initial wxEVT_SIZE events fire before the lists have their real width.
+    CallAfter([this] {
+        AutoFitColumns(taskList_);
+        AutoFitColumns(summaryList_);
+    });
 }
 
 TTFrame::~TTFrame() {
