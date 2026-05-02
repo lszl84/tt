@@ -112,9 +112,9 @@ void TTFrame::BuildLayout() {
                                        wxDefaultPosition, wxDefaultSize,
                                        wxDV_SINGLE | wxDV_ROW_LINES);
     taskList_->AppendTextColumn("Task", wxDATAVIEW_CELL_INERT,
-        FromDIP(320), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
+        FromDIP(320), wxALIGN_LEFT);
     taskList_->AppendTextColumn("Time", wxDATAVIEW_CELL_INERT,
-        FromDIP(110), wxALIGN_RIGHT, wxDATAVIEW_COL_RESIZABLE);
+        FromDIP(110), wxALIGN_RIGHT);
 
     // ---- Toggle button ----
     toggleBtn_ = new wxButton(panel, ID_TOGGLE, "Start");
@@ -139,9 +139,9 @@ void TTFrame::BuildLayout() {
                                           wxDefaultPosition, FromDIP(wxSize(-1, 160)),
                                           wxDV_SINGLE | wxDV_ROW_LINES | wxDV_NO_HEADER);
     summaryList_->AppendTextColumn("Task", wxDATAVIEW_CELL_INERT,
-        FromDIP(320), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
+        FromDIP(320), wxALIGN_LEFT);
     summaryList_->AppendTextColumn("Time", wxDATAVIEW_CELL_INERT,
-        FromDIP(110), wxALIGN_RIGHT, wxDATAVIEW_COL_RESIZABLE);
+        FromDIP(110), wxALIGN_RIGHT);
 
     constexpr int kPad = 8;
     outer->Add(inputRow,     0, wxEXPAND | wxALL, kPad);
@@ -161,9 +161,13 @@ void TTFrame::AutoFitColumns(wxDataViewListCtrl* list) {
     if (!taskCol || !timeCol) return;
     int total = list->GetClientSize().GetWidth();
     if (total <= 0) return;
-    int timeW = timeCol->GetWidth();
-    int taskW = std::max(FromDIP(80), total - timeW - FromDIP(4));
+    // Reserve space for the vertical scrollbar so no horizontal scrollbar appears.
+    total -= wxSystemSettings::GetMetric(wxSYS_VSCROLL_X, list);
+    int timeW = total / 3;
+    int taskW = total - timeW;
+    if (taskW < FromDIP(80)) taskW = FromDIP(80);
     taskCol->SetWidth(taskW);
+    timeCol->SetWidth(timeW);
 }
 
 int TTFrame::GetSelectedTask() const {
