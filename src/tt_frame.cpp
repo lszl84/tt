@@ -1,5 +1,8 @@
 #include "tt_frame.h"
+#include "tt_icon.h"
 #include <wx/sizer.h>
+#include <wx/bmpbndl.h>
+#include <wx/iconbndl.h>
 
 namespace {
 
@@ -17,8 +20,21 @@ constexpr int kTickerMs = 1000;  // 1 Hz; FormatDuration is second-resolution
 
 TTFrame::TTFrame()
     : wxFrame(nullptr, wxID_ANY, "Time Tracker",
-              wxDefaultPosition, wxSize(560, 640)),
+              wxDefaultPosition, wxSize(253, 560)),
       ticker_(this) {
+
+    {
+        auto bb = wxBitmapBundle::FromSVG(
+            reinterpret_cast<const wxByte*>(kTTIconSVG),
+            sizeof(kTTIconSVG) - 1, wxSize(256, 256));
+        wxIconBundle icons;
+        for (int sz : {16, 24, 32, 48, 64, 128, 256}) {
+            wxIcon ic;
+            ic.CopyFromBitmap(bb.GetBitmap(wxSize(sz, sz)));
+            icons.AddIcon(ic);
+        }
+        SetIcons(icons);
+    }
 
     LoadState(state_);
     if (state_.tasks.empty()) {
@@ -62,7 +78,7 @@ TTFrame::TTFrame()
     RefreshToggleButton();
 
     ticker_.Start(kTickerMs);
-    SetMinSize(wxSize(420, 480));
+    SetMinSize(wxSize(280, 480));
     input_->SetFocus();
 
     // After the frame has settled at its final size, fit columns once more —
