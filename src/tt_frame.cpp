@@ -1,19 +1,17 @@
 #include "tt_frame.h"
 #include <wx/sizer.h>
-#include <wx/statline.h>
 
 namespace {
 
-constexpr int ID_INPUT      = wxID_HIGHEST + 1;
-constexpr int ID_ADD        = wxID_HIGHEST + 2;
-constexpr int ID_TASKLIST   = wxID_HIGHEST + 3;
-constexpr int ID_TOGGLE     = wxID_HIGHEST + 4;
-constexpr int ID_RANGE_PREV = wxID_HIGHEST + 5;
-constexpr int ID_RANGE_NEXT = wxID_HIGHEST + 6;
+constexpr int ID_INPUT       = wxID_HIGHEST + 1;
+constexpr int ID_ADD         = wxID_HIGHEST + 2;
+constexpr int ID_TASKLIST    = wxID_HIGHEST + 3;
+constexpr int ID_TOGGLE      = wxID_HIGHEST + 4;
+constexpr int ID_RANGE_PREV  = wxID_HIGHEST + 5;
+constexpr int ID_RANGE_NEXT  = wxID_HIGHEST + 6;
+constexpr int ID_SUMMARYLIST = wxID_HIGHEST + 7;
 
 constexpr int kTickerMs = 1000;  // 1 Hz; FormatDuration is second-resolution
-
-const wxColour kActiveBg(70, 145, 90);   // green tint for the active row
 
 }  // namespace
 
@@ -34,16 +32,22 @@ TTFrame::TTFrame()
     Bind(wxEVT_BUTTON,     &TTFrame::OnToggle,     this, ID_TOGGLE);
     Bind(wxEVT_BUTTON,     &TTFrame::OnRangePrev,  this, ID_RANGE_PREV);
     Bind(wxEVT_BUTTON,     &TTFrame::OnRangeNext,  this, ID_RANGE_NEXT);
-    Bind(wxEVT_LIST_ITEM_ACTIVATED, &TTFrame::OnTaskActivated, this, ID_TASKLIST);
-    Bind(wxEVT_LIST_ITEM_SELECTED,
-         [this](wxListEvent&) { RefreshToggleButton(); }, ID_TASKLIST);
+    Bind(wxEVT_DATAVIEW_ITEM_ACTIVATED, &TTFrame::OnTaskActivated, this, ID_TASKLIST);
+    Bind(wxEVT_DATAVIEW_SELECTION_CHANGED,
+         [this](wxDataViewEvent&) { RefreshToggleButton(); }, ID_TASKLIST);
     Bind(wxEVT_CLOSE_WINDOW, &TTFrame::OnClose, this);
     Bind(wxEVT_TIMER,      &TTFrame::OnTick,       this);
     taskList_->Bind(wxEVT_KEY_DOWN, &TTFrame::OnTaskKey, this);
 
-    if (!state_.tasks.empty()) {
-        taskList_->Select(0);
-        taskList_->Focus(0);
+    taskList_->Bind(wxEVT_SIZE, [this](wxSizeEvent& e) {
+        AutoFitColumns(taskList_); e.Skip();
+    });
+    summaryList_->Bind(wxEVT_SIZE, [this](wxSizeEvent& e) {
+        AutoFitColumns(summaryList_); e.Skip();
+    });
+
+    if (taskList_->GetItemCount() > 0) {
+        taskList_->SelectRow(0);
     }
 
     ticker_.Start(kTickerMs);
@@ -70,11 +74,13 @@ void TTFrame::BuildLayout() {
     inputRow->Add(addBtn_, 0, wxALIGN_CENTER_VERTICAL);
 
     // ---- Task list ----
-    taskList_ = new wxListView(panel, ID_TASKLIST,
-                               wxDefaultPosition, wxDefaultSize,
-                               wxLC_REPORT | wxLC_SINGLE_SEL);
-    taskList_->AppendColumn("Task", wxLIST_FORMAT_LEFT, FromDIP(320));
-    taskList_->AppendColumn("Time", wxLIST_FORMAT_RIGHT, FromDIP(120));
+    taskList_ = new wxDataViewListCtrl(panel, ID_TASKLIST,
+                                       wxDefaultPosition, wxDefaultSize,
+                                       wxDV_SINGLE | wxDV_ROW_LINES);
+    taskList_->AppendTextColumn("Task", wxDATAVIEW_CELL_INERT,
+        FromDIP(320), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
+    taskList_->AppendTextColumn("Time", wxDATAVIEW_CELL_INERT,
+        FromDIP(110), wxALIGN_RIGHT, wxDATAVIEW_COL_RESIZABLE);
 
     // ---- Toggle button ----
     toggleBtn_ = new wxButton(panel, ID_TOGGLE, "Start");
@@ -95,28 +101,41 @@ void TTFrame::BuildLayout() {
 
     totalLabel_ = new wxStaticText(panel, wxID_ANY, "Total: 0s");
 
-    summaryList_ = new wxListView(panel, wxID_ANY,
-                                  wxDefaultPosition, FromDIP(wxSize(-1, 160)),
-                                  wxLC_REPORT | wxLC_NO_HEADER | wxLC_SINGLE_SEL);
-    summaryList_->AppendColumn("Task", wxLIST_FORMAT_LEFT, FromDIP(320));
-    summaryList_->AppendColumn("Time", wxLIST_FORMAT_RIGHT, FromDIP(120));
+    summaryList_ = new wxDataViewListCtrl(panel, ID_SUMMARYLIST,
+                                          wxDefaultPosition, FromDIP(wxSize(-1, 160)),
+                                          wxDV_SINGLE | wxDV_ROW_LINES | wxDV_NO_HEADER);
+    summaryList_->AppendTextColumn("Task", wxDATAVIEW_CELL_INERT,
+        FromDIP(320), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
+    summaryList_->AppendTextColumn("Time", wxDATAVIEW_CELL_INERT,
+        FromDIP(110), wxALIGN_RIGHT, wxDATAVIEW_COL_RESIZABLE);
 
     constexpr int kPad = 8;
-    outer->Add(inputRow,    0, wxEXPAND | wxALL, kPad);
-    outer->Add(taskList_,   1, wxEXPAND | wxLEFT | wxRIGHT, kPad);
-    outer->Add(toggleBtn_,  0, wxEXPAND | wxALL, kPad);
-    outer->Add(new wxStaticLine(panel), 0, wxEXPAND | wxLEFT | wxRIGHT, kPad);
-    outer->Add(sumHeader,   0, wxEXPAND | wxALL, kPad);
-    outer->Add(totalLabel_, 0, wxLEFT | wxRIGHT | wxBOTTOM, kPad);
+    outer->Add(inputRow,     0, wxEXPAND | wxALL, kPad);
+    outer->Add(taskList_,    1, wxEXPAND | wxLEFT | wxRIGHT, kPad);
+    outer->Add(toggleBtn_,   0, wxEXPAND | wxALL, kPad);
+    outer->Add(sumHeader,    0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, kPad);
+    outer->Add(totalLabel_,  0, wxLEFT | wxRIGHT | wxBOTTOM, kPad);
     outer->Add(summaryList_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, kPad);
 
     panel->SetSizer(outer);
 }
 
+void TTFrame::AutoFitColumns(wxDataViewListCtrl* list) {
+    if (!list) return;
+    auto* taskCol = list->GetColumn(0);
+    auto* timeCol = list->GetColumn(1);
+    if (!taskCol || !timeCol) return;
+    int total = list->GetClientSize().GetWidth();
+    if (total <= 0) return;
+    int timeW = timeCol->GetWidth();
+    int taskW = std::max(FromDIP(80), total - timeW - FromDIP(4));
+    taskCol->SetWidth(taskW);
+}
+
 int TTFrame::GetSelectedTask() const {
-    long sel = taskList_->GetFirstSelected();
-    if (sel < 0 || sel >= (long)state_.tasks.size()) return -1;
-    return (int)sel;
+    int sel = taskList_->GetSelectedRow();
+    if (sel < 0 || sel >= (int)state_.tasks.size()) return -1;
+    return sel;
 }
 
 void TTFrame::Save() {
@@ -126,32 +145,33 @@ void TTFrame::Save() {
 }
 
 void TTFrame::RefreshTaskList() {
-    long prevSel = taskList_->GetFirstSelected();
+    int prevSel = taskList_->GetSelectedRow();
     taskList_->DeleteAllItems();
     auto now = std::chrono::steady_clock::now();
     for (size_t i = 0; i < state_.tasks.size(); ++i) {
-        long row = taskList_->InsertItem((long)i, wxString::FromUTF8(state_.tasks[i].name));
-        taskList_->SetItem(row, 1,
-            wxString::FromUTF8(FormatDuration(GetTaskTime(state_, (int)i, range_, now))));
-        if (state_.tasks[i].active) {
-            taskList_->SetItemBackgroundColour(row, kActiveBg);
-            taskList_->SetItemTextColour(row, *wxWHITE);
-        }
+        const bool active = state_.tasks[i].active;
+        wxString name = wxString::FromUTF8(state_.tasks[i].name);
+        if (active) name.Prepend(wxString::FromUTF8("\xE2\x96\xB6 "));  // ▶
+        wxVector<wxVariant> row;
+        row.push_back(wxVariant(name));
+        row.push_back(wxVariant(wxString::FromUTF8(
+            FormatDuration(GetTaskTime(state_, (int)i, range_, now)))));
+        taskList_->AppendItem(row);
     }
-    if (prevSel >= 0 && prevSel < taskList_->GetItemCount()) {
-        taskList_->Select(prevSel);
-        taskList_->Focus(prevSel);
-    } else if (taskList_->GetItemCount() > 0) {
-        taskList_->Select(0);
-        taskList_->Focus(0);
+    int count = taskList_->GetItemCount();
+    if (prevSel >= 0 && prevSel < count) {
+        taskList_->SelectRow(prevSel);
+    } else if (count > 0) {
+        taskList_->SelectRow(0);
     }
 }
 
 void TTFrame::RefreshTimes() {
     auto now = std::chrono::steady_clock::now();
     for (size_t i = 0; i < state_.tasks.size(); ++i) {
-        taskList_->SetItem((long)i, 1,
-            wxString::FromUTF8(FormatDuration(GetTaskTime(state_, (int)i, range_, now))));
+        taskList_->SetValue(wxVariant(wxString::FromUTF8(
+            FormatDuration(GetTaskTime(state_, (int)i, range_, now)))),
+            (unsigned)i, 1);
     }
     RefreshSummary();
 }
@@ -164,9 +184,10 @@ void TTFrame::RefreshSummary() {
     for (size_t i = 0; i < state_.tasks.size(); ++i) {
         double t = GetTaskTime(state_, (int)i, range_, now);
         total += t;
-        long row = summaryList_->InsertItem((long)i,
-            wxString::FromUTF8(state_.tasks[i].name));
-        summaryList_->SetItem(row, 1, wxString::FromUTF8(FormatDuration(t)));
+        wxVector<wxVariant> row;
+        row.push_back(wxVariant(wxString::FromUTF8(state_.tasks[i].name)));
+        row.push_back(wxVariant(wxString::FromUTF8(FormatDuration(t))));
+        summaryList_->AppendItem(row);
     }
     totalLabel_->SetLabel(wxString::Format("Total: %s",
         wxString::FromUTF8(FormatDuration(total))));
@@ -191,10 +212,9 @@ void TTFrame::OnAdd(wxCommandEvent&) {
     RefreshTaskList();
     RefreshSummary();
     // Focus the newly-added task so a subsequent Start hits it.
-    long last = taskList_->GetItemCount() - 1;
+    int last = taskList_->GetItemCount() - 1;
     if (last >= 0) {
-        taskList_->Select(last);
-        taskList_->Focus(last);
+        taskList_->SelectRow(last);
     }
     RefreshToggleButton();
 }
@@ -221,7 +241,7 @@ void TTFrame::OnToggle(wxCommandEvent&) {
     RefreshToggleButton();
 }
 
-void TTFrame::OnTaskActivated(wxListEvent& e) {
+void TTFrame::OnTaskActivated(wxDataViewEvent&) {
     // Double-click / Enter on a task toggles tracking on it.
     wxCommandEvent ev(wxEVT_BUTTON, ID_TOGGLE);
     OnToggle(ev);
@@ -251,10 +271,6 @@ void TTFrame::OnRangeNext(wxCommandEvent&) {
 void TTFrame::OnTick(wxTimerEvent&) {
     if (state_.activeTask < 0) return;
     RefreshTimes();
-    // Selection state also reflects which row is "the toggle target", so the
-    // button label only needs refresh on selection change. The list raises
-    // SELECTED events, but we don't need fine-grained tracking — the toggle
-    // button picks up the current selection at click time.
 }
 
 void TTFrame::OnClose(wxCloseEvent& evt) {

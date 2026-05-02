@@ -1,6 +1,6 @@
 #pragma once
 #include <wx/wx.h>
-#include <wx/listctrl.h>
+#include <wx/dataview.h>
 #include <wx/timer.h>
 #include "data.h"
 
@@ -15,13 +15,13 @@ private:
 
     wxTextCtrl*  input_         = nullptr;
     wxButton*    addBtn_        = nullptr;
-    wxListView*  taskList_      = nullptr;
+    wxDataViewListCtrl* taskList_    = nullptr;
     wxButton*    toggleBtn_     = nullptr;
     wxStaticText* totalLabel_   = nullptr;
     wxStaticText* rangeLabel_   = nullptr;
     wxButton*    rangePrevBtn_  = nullptr;
     wxButton*    rangeNextBtn_  = nullptr;
-    wxListView*  summaryList_   = nullptr;
+    wxDataViewListCtrl* summaryList_ = nullptr;
 
     wxTimer ticker_;
 
@@ -30,6 +30,7 @@ private:
     void RefreshTimes();
     void RefreshSummary();
     void RefreshToggleButton();
+    void AutoFitColumns(wxDataViewListCtrl* list);
 
     int GetSelectedTask() const;
     void Save();
@@ -37,7 +38,7 @@ private:
     void OnAdd(wxCommandEvent&);
     void OnInputEnter(wxCommandEvent&);
     void OnToggle(wxCommandEvent&);
-    void OnTaskActivated(wxListEvent&);
+    void OnTaskActivated(wxDataViewEvent&);
     void OnRangePrev(wxCommandEvent&);
     void OnRangeNext(wxCommandEvent&);
     void OnTaskKey(wxKeyEvent&);
