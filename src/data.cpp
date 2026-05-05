@@ -1,7 +1,6 @@
 #include "data.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -88,11 +87,6 @@ void ApplyActiveFromSessions(TTState& state) {
         tt.active = true;
         tt.activeSessionId = s.id;
         tt.wallStart = s.start;
-        std::time_t now_t = std::time(nullptr);
-        double elapsed = std::max(0.0, std::difftime(now_t, s.start));
-        auto offset = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-            std::chrono::duration<double>(elapsed));
-        tt.steadyStart = std::chrono::steady_clock::now() - offset;
         state.activeTask = idx;
     }
 }
@@ -207,7 +201,7 @@ int FindTaskById(const TTState& state, const std::string& id) {
 }
 
 double GetTaskTime(const TTState& state, int idx, SummaryRange range,
-                   std::chrono::steady_clock::time_point now) {
+                   std::time_t now) {
     if (idx < 0 || idx >= (int)state.tasks.size()) return 0;
     auto [rangeStart, rangeEnd] = GetRangeBounds(range);
     double total = 0;
@@ -218,17 +212,9 @@ double GetTaskTime(const TTState& state, int idx, SummaryRange range,
             total += s.seconds;
     }
     const Task& t = state.tasks[idx];
-    if (t.active) {
-        std::time_t wnow = std::time(nullptr);
-        if (wnow >= rangeStart && wnow < rangeEnd) {
-            double fullElapsed = std::chrono::duration<double>(now - t.steadyStart).count();
-            if (t.wallStart >= rangeStart) {
-                total += fullElapsed;
-            } else {
-                double beforeRange = std::difftime(rangeStart, t.wallStart);
-                total += std::max(0.0, fullElapsed - beforeRange);
-            }
-        }
+    if (t.active && now >= rangeStart && now < rangeEnd) {
+        std::time_t from = std::max(t.wallStart, rangeStart);
+        total += std::max(0.0, std::difftime(now, from));
     }
     return total;
 }
@@ -248,7 +234,6 @@ void StartTask(TTState& state, int idx) {
     state.sessions.push_back(std::move(s));
 
     t.active = true;
-    t.steadyStart = std::chrono::steady_clock::now();
     t.wallStart = now_wall;
     t.activeSessionId = state.sessions.back().id;
     state.activeTask = idx;

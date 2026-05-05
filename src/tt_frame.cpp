@@ -185,7 +185,7 @@ void TTFrame::Save() {
 void TTFrame::RefreshTaskList() {
     int prevSel = taskList_->GetSelectedRow();
     taskList_->DeleteAllItems();
-    auto now = std::chrono::steady_clock::now();
+    std::time_t now = std::time(nullptr);
     for (size_t i = 0; i < state_.tasks.size(); ++i) {
         const bool active = state_.tasks[i].active;
         wxString name = wxString::FromUTF8(state_.tasks[i].name);
@@ -205,7 +205,7 @@ void TTFrame::RefreshTaskList() {
 }
 
 void TTFrame::RefreshTimes() {
-    auto now = std::chrono::steady_clock::now();
+    std::time_t now = std::time(nullptr);
     for (size_t i = 0; i < state_.tasks.size(); ++i) {
         taskList_->SetValue(wxVariant(wxString::FromUTF8(
             FormatDuration(GetTaskTime(state_, (int)i, range_, now)))),
@@ -215,7 +215,7 @@ void TTFrame::RefreshTimes() {
 }
 
 void TTFrame::RefreshSummary() {
-    auto now = std::chrono::steady_clock::now();
+    std::time_t now = std::time(nullptr);
     rangeLabel_->SetLabel(RangeHeader(range_));
     double total = 0;
     summaryList_->DeleteAllItems();

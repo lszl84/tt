@@ -1,6 +1,5 @@
 #pragma once
 
-#include <chrono>
 #include <ctime>
 #include <filesystem>
 #include <string>
@@ -11,8 +10,7 @@ struct Task {
     std::string id;            // stable UUID, persisted
     std::string name;
     bool active = false;
-    std::chrono::steady_clock::time_point steadyStart;
-    std::time_t wallStart = 0;
+    std::time_t wallStart = 0;   // wall-clock start of the open session
     std::string activeSessionId; // id of the open session driving this task
 };
 
@@ -57,10 +55,10 @@ std::pair<std::time_t, std::time_t> GetRangeBounds(SummaryRange r);
 const char* RangeLabel(SummaryRange r);
 const char* RangeHeader(SummaryRange r);
 
-// Total tracked time for one task within `range`. Counts open sessions up to
-// `now` so the active row updates live.
+// Total tracked time for one task within `range`. The open session (if any)
+// counts up to the current wall-clock `now` so the active row updates live.
 double GetTaskTime(const TTState& state, int idx, SummaryRange range,
-                   std::chrono::steady_clock::time_point now);
+                   std::time_t now);
 
 // Mutators. Caller is responsible for persisting after.
 void StartTask(TTState& state, int idx);
