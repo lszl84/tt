@@ -3,6 +3,13 @@
 #include <wx/sizer.h>
 #include <wx/bmpbndl.h>
 #include <wx/iconbndl.h>
+#include <wx/statusbr.h>
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <cstring>
+#include <sstream>
+#include <thread>
 
 namespace {
 
@@ -15,6 +22,13 @@ constexpr int ID_RANGE_NEXT  = wxID_HIGHEST + 6;
 constexpr int ID_SUMMARYLIST = wxID_HIGHEST + 7;
 
 constexpr int kTickerMs = 1000;  // 1 Hz; FormatDuration is second-resolution
+
+wxString FormatTime(std::time_t t) {
+    std::tm tm = *std::localtime(&t);
+    char buf[16];
+    std::strftime(buf, sizeof(buf), "%H:%M", &tm);
+    return wxString::FromUTF8(buf);
+}
 
 }  // namespace
 
@@ -87,6 +101,8 @@ TTFrame::TTFrame()
         AutoFitColumns(taskList_);
         AutoFitColumns(summaryList_);
     });
+
+    UpdateStartupStatus();
 }
 
 TTFrame::~TTFrame() {
@@ -96,6 +112,10 @@ TTFrame::~TTFrame() {
 void TTFrame::BuildLayout() {
     auto* panel = new wxPanel(this);
     auto* outer = new wxBoxSizer(wxVERTICAL);
+
+    // ---- Status bar ----
+    statusBar_ = CreateStatusBar(1, wxSTB_DEFAULT_STYLE);
+    statusBar_->SetStatusText("Ready");
 
     // ---- Input row ----
     auto* inputRow = new wxBoxSizer(wxHORIZONTAL);
@@ -264,19 +284,34 @@ void TTFrame::OnInputEnter(wxCommandEvent& e) {
 void TTFrame::OnToggle(wxCommandEvent&) {
     int sel = GetSelectedTask();
     if (sel < 0) return;
+
+    const wxString taskName = wxString::FromUTF8(state_.tasks[sel].name);
+    const wxString timeStr = FormatTime(std::time(nullptr));
+
     // Stop any other running task first.
     if (state_.activeTask >= 0 && state_.activeTask != sel) {
         StopTask(state_, state_.activeTask);
     }
+
     if (state_.tasks[sel].active) {
         StopTask(state_, sel);
+        if (statusBar_) {
+            statusBar_->SetStatusText(
+                wxString::Format("Stopped '%s' at %s", taskName, timeStr));
+        }
     } else {
         StartTask(state_, sel);
+        if (statusBar_) {
+            statusBar_->SetStatusText(
+                wxString::Format("Started '%s' at %s", taskName, timeStr));
+        }
     }
     Save();
     RefreshTaskList();
     RefreshSummary();
     RefreshToggleButton();
+
+    TryGitPush();
 }
 
 void TTFrame::OnTaskActivated(wxDataViewEvent&) {
@@ -314,4 +349,70 @@ void TTFrame::OnTick(wxTimerEvent&) {
 void TTFrame::OnClose(wxCloseEvent& evt) {
     Save();
     evt.Skip();
+}
+
+void TTFrame::UpdateStartupStatus() {
+    if (!statusBar_) return;
+
+    if (state_.activeTask >= 0 && state_.activeTask < (int)state_.tasks.size()) {
+        const wxString name = wxString::FromUTF8(
+            state_.tasks[state_.activeTask].name);
+        statusBar_->SetStatusText(
+            wxString::FromUTF8("\xE2\x96\xB6 Task '") + name +
+            wxString::FromUTF8("' is running"));
+    } else {
+        statusBar_->SetStatusText("No task running");
+    }
+}
+
+bool TTFrame::IsGitRepo(const std::filesystem::path& dir) {
+    std::error_code ec;
+    return std::filesystem::exists(dir / ".git", ec);
+}
+
+void TTFrame::TryGitPush() {
+    if (gitPushInProgress_.exchange(true)) return;  // already running
+
+    std::filesystem::path dataDir = GetDataPath().parent_path();
+    if (!IsGitRepo(dataDir)) {
+        gitPushInProgress_ = false;
+        return;
+    }
+
+    // Build the command: cd to data dir, commit and push
+    std::string cmd = "cd \"" + dataDir.string() + "\" && "
+                      "git add -A && "
+                      "git commit -m \"auto: updates\" && "
+                      "git push 2>&1";
+
+    // Run in background thread
+    std::thread([this, cmd](std::string c) {
+        std::array<char, 256> buffer;
+        std::string output;
+        FILE* pipe = popen(c.c_str(), "r");
+        if (pipe) {
+            while (fgets(buffer.data(), (int)buffer.size(), pipe) != nullptr) {
+                output += buffer.data();
+            }
+            int rc = pclose(pipe);
+            // Call back to the UI thread
+            CallAfter([this, success = (rc == 0), msg = std::move(output)]() {
+                OnGitResult(success
+                    ? wxString::Format("Pushed at %s", FormatTime(std::time(nullptr)))
+                    : wxString::Format("Git error: %s",
+                        wxString::FromUTF8(msg).Trim()));
+            });
+        } else {
+            CallAfter([this]() {
+                OnGitResult("Git error: failed to run git");
+            });
+        }
+        gitPushInProgress_ = false;
+    }, cmd).detach();
+}
+
+void TTFrame::OnGitResult(const wxString& message) {
+    if (statusBar_) {
+        statusBar_->SetStatusText(message);
+    }
 }

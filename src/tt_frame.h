@@ -2,6 +2,7 @@
 #include <wx/wx.h>
 #include <wx/dataview.h>
 #include <wx/timer.h>
+#include <atomic>
 #include "data.h"
 
 class TTFrame : public wxFrame {
@@ -22,8 +23,10 @@ private:
     wxButton*    rangePrevBtn_  = nullptr;
     wxButton*    rangeNextBtn_  = nullptr;
     wxDataViewListCtrl* summaryList_ = nullptr;
+    wxStatusBar* statusBar_     = nullptr;
 
     wxTimer ticker_;
+    std::atomic<bool> gitPushInProgress_{false};
 
     void BuildLayout();
     void RefreshTaskList();
@@ -31,9 +34,14 @@ private:
     void RefreshSummary();
     void RefreshToggleButton();
     void AutoFitColumns(wxDataViewListCtrl* list);
+    void UpdateStartupStatus();
 
     int GetSelectedTask() const;
     void Save();
+
+    bool IsGitRepo(const std::filesystem::path& dir);
+    void TryGitPush();
+    void OnGitResult(const wxString& message);
 
     void OnAdd(wxCommandEvent&);
     void OnInputEnter(wxCommandEvent&);
