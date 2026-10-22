@@ -51,6 +51,9 @@ set(SRCS
     src/main.cpp
     src/tt_frame.cpp
     src/data.cpp
+    src/cli.cpp
+    src/git_sync.cpp
+    src/omarchy.cpp
 )
 
 if(APPLE)
@@ -69,6 +72,19 @@ target_link_libraries(tt PRIVATE
 target_compile_options(tt PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
 include(GNUInstallDirs)
+
+# ---- Omarchy bar widget ----
+# Not under share/tt: with a ~/.local prefix that is the data dir itself,
+# which may be a git repo that tt commits wholesale.
+set(TT_OMARCHY_PLUGIN_DIR ${CMAKE_INSTALL_DATADIR}/tt-omarchy-plugin)
+file(RELATIVE_PATH TT_OMARCHY_PLUGIN_REL
+    ${CMAKE_INSTALL_FULL_BINDIR}
+    ${CMAKE_INSTALL_PREFIX}/${TT_OMARCHY_PLUGIN_DIR})
+target_compile_definitions(tt PRIVATE
+    TT_OMARCHY_PLUGIN_REL="${TT_OMARCHY_PLUGIN_REL}"
+    TT_OMARCHY_PLUGIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/omarchy"
+)
+
 install(TARGETS tt
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     BUNDLE DESTINATION .
@@ -76,4 +92,5 @@ install(TARGETS tt
 if(LINUX OR CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
     install(FILES tt.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
     install(FILES tt.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+    install(DIRECTORY omarchy/ DESTINATION ${TT_OMARCHY_PLUGIN_DIR})
 endif()

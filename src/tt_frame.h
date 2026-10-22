@@ -39,7 +39,6 @@ private:
     int GetSelectedTask() const;
     void Save();
 
-    bool IsGitRepo(const std::filesystem::path& dir);
     void TryGitPush();
     void OnGitResult(const wxString& message);
 

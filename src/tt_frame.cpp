@@ -1,11 +1,11 @@
 #include "tt_frame.h"
+#include "git_sync.h"
 #include "tt_icon.h"
 #include <wx/sizer.h>
 #include <wx/bmpbndl.h>
 #include <wx/iconbndl.h>
 #include <wx/statusbr.h>
 #include <algorithm>
-#include <array>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -24,10 +24,7 @@ constexpr int ID_SUMMARYLIST = wxID_HIGHEST + 7;
 constexpr int kTickerMs = 1000;  // 1 Hz; FormatDuration is second-resolution
 
 wxString FormatTime(std::time_t t) {
-    std::tm tm = *std::localtime(&t);
-    char buf[16];
-    std::strftime(buf, sizeof(buf), "%H:%M", &tm);
-    return wxString::FromUTF8(buf);
+    return wxString::FromUTF8(FormatClock(t));
 }
 
 }  // namespace
@@ -51,13 +48,7 @@ TTFrame::TTFrame()
     }
 
     LoadState(state_);
-    if (state_.tasks.empty()) {
-        for (const char* n : {"Development", "Code Review", "Meetings", "Planning"}) {
-            Task t;
-            t.id = GenerateUuid();
-            t.name = n;
-            state_.tasks.push_back(std::move(t));
-        }
+    if (SeedDefaultTasks(state_)) {
         SaveState(state_);
     }
 
@@ -261,10 +252,7 @@ void TTFrame::OnAdd(wxCommandEvent&) {
     wxString text = input_->GetValue();
     text.Trim().Trim(false);
     if (text.IsEmpty()) return;
-    Task t;
-    t.id = GenerateUuid();
-    t.name = text.ToStdString(wxConvUTF8);
-    state_.tasks.push_back(std::move(t));
+    AddTask(state_, text.ToStdString(wxConvUTF8));
     input_->Clear();
     Save();
     RefreshTaskList();
@@ -288,23 +276,12 @@ void TTFrame::OnToggle(wxCommandEvent&) {
     const wxString taskName = wxString::FromUTF8(state_.tasks[sel].name);
     const wxString timeStr = FormatTime(std::time(nullptr));
 
-    // Stop any other running task first.
-    if (state_.activeTask >= 0 && state_.activeTask != sel) {
-        StopTask(state_, state_.activeTask);
-    }
-
-    if (state_.tasks[sel].active) {
-        StopTask(state_, sel);
-        if (statusBar_) {
-            statusBar_->SetStatusText(
-                wxString::Format("Stopped '%s' at %s", taskName, timeStr));
-        }
-    } else {
-        StartTask(state_, sel);
-        if (statusBar_) {
-            statusBar_->SetStatusText(
-                wxString::Format("Started '%s' at %s", taskName, timeStr));
-        }
+    // Stops any other running task first.
+    const bool started = ToggleTask(state_, sel);
+    if (statusBar_) {
+        statusBar_->SetStatusText(wxString::Format(
+            started ? "Started '%s' at %s" : "Stopped '%s' at %s",
+            taskName, timeStr));
     }
     Save();
     RefreshTaskList();
@@ -365,11 +342,6 @@ void TTFrame::UpdateStartupStatus() {
     }
 }
 
-bool TTFrame::IsGitRepo(const std::filesystem::path& dir) {
-    std::error_code ec;
-    return std::filesystem::exists(dir / ".git", ec);
-}
-
 void TTFrame::TryGitPush() {
     if (gitPushInProgress_.exchange(true)) return;  // already running
 
@@ -379,36 +351,16 @@ void TTFrame::TryGitPush() {
         return;
     }
 
-    // Build the command: cd to data dir, commit and push
-    std::string cmd = "cd \"" + dataDir.string() + "\" && "
-                      "git add -A && "
-                      "git commit -m \"auto: updates\" && "
-                      "git push 2>&1";
-
     // Run in background thread
-    std::thread([this, cmd](std::string c) {
-        std::array<char, 256> buffer;
-        std::string output;
-        FILE* pipe = popen(c.c_str(), "r");
-        if (pipe) {
-            while (fgets(buffer.data(), (int)buffer.size(), pipe) != nullptr) {
-                output += buffer.data();
-            }
-            int rc = pclose(pipe);
-            // Call back to the UI thread
-            CallAfter([this, success = (rc == 0), msg = std::move(output)]() {
-                OnGitResult(success
-                    ? wxString::Format("Pushed at %s", FormatTime(std::time(nullptr)))
-                    : wxString::Format("Git error: %s",
-                        wxString::FromUTF8(msg).Trim()));
-            });
-        } else {
-            CallAfter([this]() {
-                OnGitResult("Git error: failed to run git");
-            });
-        }
+    std::thread([this, dataDir]() {
+        std::string message =
+            GitSyncMessage(RunGitSync(dataDir), std::time(nullptr));
+        // Call back to the UI thread
+        CallAfter([this, msg = std::move(message)]() {
+            OnGitResult(wxString::FromUTF8(msg));
+        });
         gitPushInProgress_ = false;
-    }, cmd).detach();
+    }).detach();
 }
 
 void TTFrame::OnGitResult(const wxString& message) {

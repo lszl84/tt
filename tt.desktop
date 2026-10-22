@@ -8,3 +8,8 @@ Icon=tt
 Categories=Office;
 Keywords=time;tracker;productivity;
 StartupWMClass=tt
+Actions=window;
+
+[Desktop Action window]
+Name=Open Window
+Exec=tt --window

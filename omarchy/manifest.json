@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "com.devmindscape.tt",
+  "name": "Time Tracker",
+  "version": "1.0.0",
+  "author": "Luke | DevMindscape",
+  "license": "GPL-3.0",
+  "description": "tt in the Omarchy bar: start and stop tasks, add tasks and see time summaries.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Time Tracker",
+    "description": "Start and stop tasks, add tasks and see time summaries.",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "showElapsed": true
+    },
+    "schema": [
+      {
+        "key": "showElapsed",
+        "type": "boolean",
+        "label": "Show running time",
+        "description": "Show how long the running task has been tracked next to the bar icon.",
+        "defaultValue": true
+      }
+    ]
+  }
+}
