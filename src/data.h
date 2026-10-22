@@ -50,6 +50,9 @@ std::string GenerateUuid();
 // Format a duration in seconds as "1h 02m 03s" / "2m 03s" / "12s".
 std::string FormatDuration(double seconds);
 
+// Format a wall-clock time as "HH:MM".
+std::string FormatClock(std::time_t t);
+
 // [start, end) wall-clock range covered by a SummaryRange option.
 std::pair<std::time_t, std::time_t> GetRangeBounds(SummaryRange r);
 const char* RangeLabel(SummaryRange r);
@@ -63,5 +66,16 @@ double GetTaskTime(const TTState& state, int idx, SummaryRange range,
 // Mutators. Caller is responsible for persisting after.
 void StartTask(TTState& state, int idx);
 void StopTask(TTState& state, int idx);
+
+// Start `idx`, stopping any other running task first, or stop it if it is
+// already running. Returns true if `idx` is running afterwards.
+bool ToggleTask(TTState& state, int idx);
+
+// Append a new task and return its index.
+int AddTask(TTState& state, const std::string& name);
+
+// Fill an empty task list with the first-run starter tasks. Returns true if
+// anything was added.
+bool SeedDefaultTasks(TTState& state);
 
 int FindTaskById(const TTState& state, const std::string& id);

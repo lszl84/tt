@@ -158,6 +158,13 @@ std::string FormatDuration(double seconds) {
     return buf;
 }
 
+std::string FormatClock(std::time_t t) {
+    std::tm tm = *std::localtime(&t);
+    char buf[16];
+    std::strftime(buf, sizeof(buf), "%H:%M", &tm);
+    return buf;
+}
+
 std::pair<std::time_t, std::time_t> GetRangeBounds(SummaryRange r) {
     std::time_t now = std::time(nullptr);
     std::time_t today = StartOfDay(now);
@@ -271,6 +278,35 @@ void StopTask(TTState& state, int idx) {
     t.activeSessionId.clear();
     t.wallStart = 0;
     if (state.activeTask == idx) state.activeTask = -1;
+}
+
+bool ToggleTask(TTState& state, int idx) {
+    if (idx < 0 || idx >= (int)state.tasks.size()) return false;
+    if (state.activeTask >= 0 && state.activeTask != idx) {
+        StopTask(state, state.activeTask);
+    }
+    if (state.tasks[idx].active) {
+        StopTask(state, idx);
+        return false;
+    }
+    StartTask(state, idx);
+    return true;
+}
+
+int AddTask(TTState& state, const std::string& name) {
+    Task t;
+    t.id = GenerateUuid();
+    t.name = name;
+    state.tasks.push_back(std::move(t));
+    return (int)state.tasks.size() - 1;
+}
+
+bool SeedDefaultTasks(TTState& state) {
+    if (!state.tasks.empty()) return false;
+    for (const char* n : {"Development", "Code Review", "Meetings", "Planning"}) {
+        AddTask(state, n);
+    }
+    return true;
 }
 
 bool LoadState(TTState& state) {
