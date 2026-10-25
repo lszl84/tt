@@ -28,19 +28,25 @@ int main(int argc, char** argv) {
     if (int rc = RunCli(argc, argv); rc >= 0) return rc;
 
     // --window opens the window even where the Omarchy bar widget is
-    // available. Drop it before wx sees the arguments.
+    // available; --popup shows or hides the widget's dropdown (for a keyboard
+    // shortcut). Drop both before wx sees the arguments.
     bool forceWindow = false;
+    bool togglePopup = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--window") == 0) {
             forceWindow = true;
-            std::memmove(&argv[i], &argv[i + 1], (argc - i) * sizeof(char*));
-            --argc;
-            --i;
+        } else if (std::strcmp(argv[i], "--popup") == 0) {
+            togglePopup = true;
+        } else {
+            continue;
         }
+        std::memmove(&argv[i], &argv[i + 1], (argc - i) * sizeof(char*));
+        --argc;
+        --i;
     }
 
     if (!forceWindow && OmarchyShellAvailable()) {
-        if (RunOmarchyLauncher()) return 0;
+        if (RunOmarchyLauncher(togglePopup)) return 0;
         std::fprintf(stderr, "tt: opening the window instead\n");
     }
     return wxEntry(argc, argv);

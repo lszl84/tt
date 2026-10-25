@@ -294,7 +294,7 @@ bool OmarchyShellAvailable() {
     return ShellCall({"shell", "ping"}, /*quiet=*/true) == "ok";
 }
 
-bool RunOmarchyLauncher() {
+bool RunOmarchyLauncher(bool togglePopup) {
     try {
         bool changed = false;
         std::string rev;
@@ -318,16 +318,26 @@ bool RunOmarchyLauncher() {
                              reply.c_str());
                 return false;
             }
-            // The new icon in the bar is the feedback; leave the dropdown shut.
-            std::printf("tt is now in the Omarchy bar\n");
-            return true;
+            if (!togglePopup) {
+                // The new icon in the bar is the feedback; leave the dropdown shut.
+                std::printf("tt is now in the Omarchy bar\n");
+                return true;
+            }
+            changed = true;  // the widget is still being created
         }
 
         // Already in the bar: open the dropdown so launching tt does something
         // visible. After an update, wait for the new code first, or the
         // dropdown opens on the old widget just before a reload replaces it.
-        if (!WaitForWidget(rev, changed) ||
-            ShellCall({"shell", "summon", kPluginId, "{}"}) != "ok") {
+        if (!WaitForWidget(rev, changed)) {
+            std::fprintf(stderr, "tt: could not open the bar widget\n");
+            return false;
+        }
+        if (togglePopup) {
+            ShellCall({"shell", "toggle", kPluginId, "{}"});  // replies with nothing
+            return true;
+        }
+        if (ShellCall({"shell", "summon", kPluginId, "{}"}) != "ok") {
             std::fprintf(stderr, "tt: could not open the bar widget\n");
             return false;
         }
@@ -341,6 +351,6 @@ bool RunOmarchyLauncher() {
 #else
 
 bool OmarchyShellAvailable() { return false; }
-bool RunOmarchyLauncher() { return false; }
+bool RunOmarchyLauncher(bool) { return false; }
 
 #endif

@@ -62,6 +62,14 @@ launches open its dropdown. `tt --window` (or the launcher's **Open Window**
 action) opens the regular window instead. Everywhere else `tt` behaves as
 before.
 
+`tt --popup` shows the dropdown, or hides it if it is already showing, and
+adds the widget to the bar first if needed. Bind it to a key in
+`~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + BACKSLASH", "Time tracker", "tt --popup")
+```
+
 The dropdown does everything the window does:
 
 - Add a task in the text field (**n** focuses it from the keyboard)

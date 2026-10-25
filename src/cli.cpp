@@ -11,11 +11,12 @@ namespace {
 using nlohmann::json;
 
 constexpr const char* kUsage =
-    "Usage: tt [--window]\n"
+    "Usage: tt [--window | --popup]\n"
     "       tt <command> [args]\n"
     "\n"
     "With no command, tt opens its window. On Omarchy it lives in the bar\n"
-    "instead; --window forces the window there too.\n"
+    "instead; --window forces the window there too, and --popup shows or\n"
+    "hides the bar widget's dropdown.\n"
     "\n"
     "Commands (each prints one JSON object):\n"
     "  status           tasks, the running task and per-range totals\n"
