@@ -1,0 +1,10 @@
+[Xfce Panel]
+Type=X-XFCE-PanelPlugin
+Encoding=UTF-8
+Name=Time Tracker
+Comment=The running tt task's time; click to show or hide the tt window
+Icon=tt
+X-XFCE-Module=tt-panel
+X-XFCE-Internal=false
+X-XFCE-Unique=false
+X-XFCE-API=2.0

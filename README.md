@@ -9,6 +9,7 @@ A minimal time-tracking app, built on wxWidgets.
 - State persisted as JSON in `$XDG_DATA_HOME/tt/state.json` (override via `$TT_DATA_DIR`)
 - If the data dir is a git repo, every start/stop is committed and pushed
 - Lives in the top bar on [Omarchy](https://omarchy.org) (see below)
+- Shows the running task's time in the Xfce panel (see below)
 
 ## Dependencies
 
@@ -36,6 +37,15 @@ sudo apt install cmake g++ libwxgtk3.2-dev
 
 If wxWidgets isn't installed, CMake will fetch and build it from source via
 `FetchContent` — no extra step required, just a longer first build.
+
+The Xfce panel plugin is built only if the panel and libwnck headers are
+installed:
+
+```bash
+sudo dnf install xfce4-panel-devel libwnck3-devel              # Fedora
+sudo pacman -S xfce4-panel libwnck3                            # Arch Linux
+sudo apt install libxfce4panel-2.0-dev libwnck-3-dev           # Debian / Ubuntu
+```
 
 ## Build
 
@@ -85,6 +95,32 @@ The widget is a view only: it runs the `tt` commands below and never touches
 the widget on another monitor and the commands stay in sync. Starts and stops
 are pushed with `tt sync`, the same as in the window.
 
+## Xfce panel
+
+The panel plugin shows the Omarchy widget's timer icon, with the running
+task's time next to it (`1:02`). Hover over it for the running task and
+today's times. A click shows the tt window, hides it if it's the window in
+use, or starts tt if it isn't running. In a vertical panel it shows only the
+icon, as the Omarchy bar does.
+
+`make install` installs the plugin with tt. The panel finds plugins under
+each prefix in the XDG data dirs, so install to one of those, such as
+`~/.local`, which needs no root:
+
+```bash
+cmake .. -DCMAKE_INSTALL_PREFIX=$HOME/.local
+make install
+xfce4-panel -r               # the panel only looks for plugins at startup
+xfce4-panel --add=tt-panel   # or Panel Preferences → Items → + → Time Tracker
+```
+
+`cmake --install . --component xfce-panel` installs just the plugin.
+
+The plugin runs the `tt` installed with it, or else the first `tt` in `PATH`.
+Like the Omarchy widget, it only runs `tt status` and watches `state.json` for
+changes. To try it without the panel, run
+`make tt-panel-window && ./tt-panel-window`.
+
 ## Command line
 
 Each command prints one JSON object:
@@ -111,6 +147,7 @@ src/
   git_sync.h/.cpp — commit and push of the data dir
   omarchy.h/.cpp  — installs and opens the Omarchy bar widget
 omarchy/          — the bar widget (QML), installed to share/tt-omarchy-plugin
+xfce/             — the Xfce panel plugin and its icons
 ```
 
 ## License

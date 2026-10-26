@@ -94,3 +94,53 @@ if(LINUX OR CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
     install(FILES tt.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
     install(DIRECTORY omarchy/ DESTINATION ${TT_OMARCHY_PLUGIN_DIR})
 endif()
+
+# ---- Xfce panel plugin ----
+# Built when the Xfce panel headers are installed.
+find_package(PkgConfig QUIET)
+if(PKG_CONFIG_FOUND)
+    pkg_check_modules(XFCE_PANEL QUIET IMPORTED_TARGET libxfce4panel-2.0 libwnck-3.0)
+endif()
+
+if(XFCE_PANEL_FOUND)
+    message(STATUS "Building the Xfce panel plugin")
+    enable_language(C)
+
+    add_library(tt-panel MODULE xfce/panel-plugin.cpp xfce/register.c)
+    target_link_libraries(tt-panel PRIVATE PkgConfig::XFCE_PANEL nlohmann_json::nlohmann_json)
+    # The icons get a directory of their own rather than going into hicolor,
+    # whose icon cache, if stale, would hide them.
+    set(TT_PANEL_ICON_DIR ${CMAKE_INSTALL_DATADIR}/tt-xfce-panel)
+    target_compile_definitions(tt-panel PRIVATE
+        TT_COMMAND="${CMAKE_INSTALL_FULL_BINDIR}/tt"
+        TT_PANEL_ICON_DIR="${CMAKE_INSTALL_FULL_DATADIR}/tt-xfce-panel"
+    )
+    target_compile_options(tt-panel PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+    # The button in a window of its own, to try it without the panel.
+    add_executable(tt-panel-window EXCLUDE_FROM_ALL xfce/panel-plugin.cpp)
+    target_link_libraries(tt-panel-window PRIVATE PkgConfig::XFCE_PANEL nlohmann_json::nlohmann_json)
+    target_compile_definitions(tt-panel-window PRIVATE
+        TT_PANEL_STANDALONE
+        TT_COMMAND="${CMAKE_INSTALL_FULL_BINDIR}/tt"
+        TT_PANEL_ICON_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xfce/icons"
+    )
+
+    # The panel looks for plugins under each prefix in the XDG data dirs,
+    # ~/.local included: the .desktop file in <prefix>/share/xfce4/panel/
+    # plugins, the module in its own lib dir relative to that prefix.
+    pkg_get_variable(XFCE_PANEL_PREFIX libxfce4panel-2.0 prefix)
+    pkg_get_variable(XFCE_PANEL_LIBDIR libxfce4panel-2.0 libdir)
+    file(RELATIVE_PATH XFCE_PANEL_LIBDIR_REL ${XFCE_PANEL_PREFIX} ${XFCE_PANEL_LIBDIR})
+    install(TARGETS tt-panel
+        LIBRARY DESTINATION ${XFCE_PANEL_LIBDIR_REL}/xfce4/panel/plugins
+        COMPONENT xfce-panel)
+    install(FILES xfce/tt-panel.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/xfce4/panel/plugins
+        COMPONENT xfce-panel)
+    install(FILES xfce/icons/tt-idle-symbolic.svg xfce/icons/tt-running-symbolic.svg
+        DESTINATION ${TT_PANEL_ICON_DIR}
+        COMPONENT xfce-panel)
+else()
+    message(STATUS "Xfce panel headers not found — skipping the panel plugin")
+endif()
