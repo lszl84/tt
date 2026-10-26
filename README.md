@@ -103,6 +103,14 @@ today's times. A click shows the tt window, hides it if it's the window in
 use, or starts tt if it isn't running. In a vertical panel it shows only the
 icon, as the Omarchy bar does.
 
+`xfce4-panel --plugin-event=tt-panel:toggle` does what a click does. Bind it
+to a key in Keyboard → Application Shortcuts, or for **Super + \\**:
+
+```bash
+xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/custom/<Super>backslash' \
+  -n -t string -s 'xfce4-panel --plugin-event=tt-panel:toggle'
+```
+
 `make install` installs the plugin with tt. The panel finds plugins under
 each prefix in the XDG data dirs, so install to one of those, such as
 `~/.local`, which needs no root:

@@ -1,6 +1,7 @@
 // tt in the Xfce panel: the Omarchy widget's timer icon, with the running
 // task's time next to it. A click shows tt's window, hides it if it is the
-// window in use, or starts tt if it isn't running.
+// window in use, or starts tt if it isn't running. A keyboard shortcut does
+// the same with `xfce4-panel --plugin-event=tt-panel:toggle`.
 //
 // Like the Omarchy widget, the plugin is a view: everything it shows comes
 // from `tt status`, and it never touches state.json itself. It only watches
@@ -8,6 +9,7 @@
 
 #define WNCK_I_KNOW_THIS_IS_UNSTABLE
 #include <gtk/gtk.h>
+#include <gdk/gdkx.h>
 #include <libwnck/libwnck.h>
 #include <libxfce4panel/libxfce4panel.h>
 #include <nlohmann/json.hpp>
@@ -367,6 +369,18 @@ void Launch(TtPanel* tp) {
     tp->launchWatchId = g_child_watch_add(tp->launched, LaunchExited, tp);
 }
 
+// The click's time, or the X server's for a shortcut, which reaches the
+// plugin with no event: libwnck warns that activating a window with time 0
+// may not work.
+guint32 EventTime(TtPanel* tp) {
+    guint32 time = gtk_get_current_event_time();
+    GdkWindow* window = gtk_widget_get_window(tp->button);
+    if (time == GDK_CURRENT_TIME && window != nullptr && GDK_IS_X11_WINDOW(window)) {
+        time = gdk_x11_get_server_time(window);
+    }
+    return time;
+}
+
 // The way the tasklist toggles a window: hide it if it is the one in use,
 // otherwise bring it up, from another workspace or minimized too.
 void Clicked(GtkButton*, gpointer data) {
@@ -384,8 +398,17 @@ void Clicked(GtkButton*, gpointer data) {
     if (inView && wnck_window_is_most_recently_activated(window)) {
         wnck_window_minimize(window);
     } else {
-        wnck_window_activate_transient(window, gtk_get_current_event_time());
+        wnck_window_activate_transient(window, EventTime(tp));
     }
+}
+
+// `xfce4-panel --plugin-event=tt-panel:toggle`, for a keyboard shortcut: what
+// a click does. Handled by the first tt plugin only, or two in the panels
+// would show the window and hide it again.
+gboolean RemoteEvent(XfcePanelPlugin*, const gchar* name, const GValue*, gpointer data) {
+    if (g_strcmp0(name, "toggle") != 0) return FALSE;
+    Clicked(nullptr, data);
+    return TRUE;
 }
 
 // ---- Setup -----------------------------------------------------------------
@@ -478,6 +501,7 @@ extern "C" void tt_panel_construct(XfcePanelPlugin* plugin) {
     g_signal_connect(plugin, "size-changed", G_CALLBACK(SizeChanged), tp);
     g_signal_connect(plugin, "mode-changed", G_CALLBACK(ModeChanged), tp);
     g_signal_connect(plugin, "free-data", G_CALLBACK(FreeData), tp);
+    g_signal_connect(plugin, "remote-event", G_CALLBACK(RemoteEvent), tp);
     SizeChanged(plugin, xfce_panel_plugin_get_size(plugin), tp);
 }
 
