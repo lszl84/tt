@@ -4,8 +4,9 @@
 #include <wx/timer.h>
 #include <atomic>
 #include "data.h"
+#include "macbar.h"
 
-class TTFrame : public wxFrame {
+class TTFrame : public wxFrame, private MacBarDelegate {
 public:
     TTFrame();
     ~TTFrame() override;
@@ -27,6 +28,7 @@ private:
 
     wxTimer ticker_;
     std::atomic<bool> gitPushInProgress_{false};
+    bool quitting_ = false;
 
     void BuildLayout();
     void RefreshTaskList();
@@ -41,6 +43,14 @@ private:
 
     void TryGitPush();
     void OnGitResult(const wxString& message);
+
+    // macOS menu bar item (src/macbar.mm).
+    MacBarSnapshot MacBarState() override;
+    void* MacBarNativeWindow() override;
+    void MacBarShowWindow() override;
+    void MacBarHideWindow() override;
+    void MacBarReloadState() override;
+    void MacBarQuit() override;
 
     void OnAdd(wxCommandEvent&);
     void OnInputEnter(wxCommandEvent&);

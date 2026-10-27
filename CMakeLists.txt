@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
 project(tt LANGUAGES CXX)
 
+if(APPLE)
+    enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 20)
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+endif()
+
 include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -57,6 +63,12 @@ set(SRCS
 )
 
 if(APPLE)
+    list(APPEND SRCS src/macbar.mm)
+    set_source_files_properties(src/macbar.mm PROPERTIES
+        COMPILE_OPTIONS "-fobjc-arc")
+endif()
+
+if(APPLE)
     add_executable(tt MACOSX_BUNDLE ${SRCS})
 elseif(WIN32)
     add_executable(tt WIN32 ${SRCS})
@@ -68,6 +80,17 @@ target_link_libraries(tt PRIVATE
     ${WX_LIBS}
     nlohmann_json::nlohmann_json
 )
+
+if(APPLE)
+    target_link_libraries(tt PRIVATE "-framework Cocoa")
+    set_target_properties(tt PROPERTIES
+        MACOSX_BUNDLE_BUNDLE_NAME "tt"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.devmindscape.tt"
+        MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/mac/Info.plist.in"
+    )
+endif()
 
 target_compile_options(tt PRIVATE -Wall -Wextra -Wno-unused-parameter)
 

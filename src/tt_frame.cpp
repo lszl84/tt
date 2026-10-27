@@ -10,6 +10,7 @@
 #include <cstring>
 #include <sstream>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -31,7 +32,7 @@ wxString FormatTime(std::time_t t) {
 
 TTFrame::TTFrame()
     : wxFrame(nullptr, wxID_ANY, "Time Tracker",
-              wxDefaultPosition, wxSize(253, 560)),
+              wxDefaultPosition, wxSize(300, 600)),
       ticker_(this) {
 
     {
@@ -83,7 +84,8 @@ TTFrame::TTFrame()
     RefreshToggleButton();
 
     ticker_.Start(kTickerMs);
-    SetMinSize(wxSize(280, 480));
+    SetMinSize(FromDIP(wxSize(280, 480)));
+    Centre();
     input_->SetFocus();
 
     // After the frame has settled at its final size, fit columns once more —
@@ -94,6 +96,10 @@ TTFrame::TTFrame()
     });
 
     UpdateStartupStatus();
+
+#if defined(__APPLE__)
+    MacBarInstall(this);
+#endif
 }
 
 TTFrame::~TTFrame() {
@@ -123,9 +129,9 @@ void TTFrame::BuildLayout() {
                                        wxDefaultPosition, wxDefaultSize,
                                        wxDV_SINGLE | wxDV_ROW_LINES);
     taskList_->AppendTextColumn("Task", wxDATAVIEW_CELL_INERT,
-        FromDIP(320), wxALIGN_LEFT);
+        FromDIP(146), wxALIGN_LEFT);
     taskList_->AppendTextColumn("Time", wxDATAVIEW_CELL_INERT,
-        FromDIP(110), wxALIGN_RIGHT);
+        FromDIP(120), wxALIGN_RIGHT);
 
     // ---- Toggle button ----
     toggleBtn_ = new wxButton(panel, ID_TOGGLE, "Start");
@@ -150,9 +156,9 @@ void TTFrame::BuildLayout() {
                                           wxDefaultPosition, FromDIP(wxSize(-1, 160)),
                                           wxDV_SINGLE | wxDV_ROW_LINES | wxDV_NO_HEADER);
     summaryList_->AppendTextColumn("Task", wxDATAVIEW_CELL_INERT,
-        FromDIP(320), wxALIGN_LEFT);
+        FromDIP(146), wxALIGN_LEFT);
     summaryList_->AppendTextColumn("Time", wxDATAVIEW_CELL_INERT,
-        FromDIP(110), wxALIGN_RIGHT);
+        FromDIP(120), wxALIGN_RIGHT);
 
     constexpr int kPad = 8;
     outer->Add(inputRow,     0, wxEXPAND | wxALL, kPad);
@@ -163,6 +169,13 @@ void TTFrame::BuildLayout() {
     outer->Add(summaryList_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, kPad);
 
     panel->SetSizer(outer);
+
+    // wxFrame does not size a single child panel by itself. Without this the
+    // panel stays at its default size and the sizer squeezes every control
+    // into a corner.
+    auto* frameSizer = new wxBoxSizer(wxVERTICAL);
+    frameSizer->Add(panel, 1, wxEXPAND);
+    SetSizer(frameSizer);
 }
 
 void TTFrame::AutoFitColumns(wxDataViewListCtrl* list) {
@@ -172,11 +185,25 @@ void TTFrame::AutoFitColumns(wxDataViewListCtrl* list) {
     if (!taskCol || !timeCol) return;
     int total = list->GetClientSize().GetWidth();
     if (total <= 0) return;
+#if defined(__APPLE__)
+    // The native table pads every column; its scrollbars overlay the rows.
+    total -= MacTableColumnSpacing(list->GetHandle());
+#else
     // Reserve space for the vertical scrollbar so no horizontal scrollbar appears.
     total -= wxSystemSettings::GetMetric(wxSYS_VSCROLL_X, list);
-    int timeW = total / 3;
+#endif
+
+    // A third of the width is the target, but the time can be "12h 34m 56s":
+    // below ~120pt it gets clipped, so keep enough for the longest duration
+    // and give the task name the rest.
+    const int minTime = FromDIP(120);
+    const int minTask = FromDIP(120);
+    int timeW = std::max(total / 3, minTime);
     int taskW = total - timeW;
-    if (taskW < FromDIP(80)) taskW = FromDIP(80);
+    if (taskW < minTask) {
+        taskW = minTask;
+        timeW = total - taskW;
+    }
     taskCol->SetWidth(taskW);
     timeCol->SetWidth(timeW);
 }
@@ -191,6 +218,9 @@ void TTFrame::Save() {
     if (!SaveState(state_)) {
         std::fprintf(stderr, "Failed to save state\n");
     }
+#if defined(__APPLE__)
+    MacBarUpdate();
+#endif
 }
 
 void TTFrame::RefreshTaskList() {
@@ -325,6 +355,14 @@ void TTFrame::OnTick(wxTimerEvent&) {
 
 void TTFrame::OnClose(wxCloseEvent& evt) {
     Save();
+#if defined(__APPLE__)
+    // On macOS tt lives in the menu bar; closing the window leaves it there.
+    // Quit from the menu bar (or ⌘Q) ends the app.
+    if (!quitting_) {
+        Hide();
+        return;
+    }
+#endif
     evt.Skip();
 }
 
@@ -367,4 +405,54 @@ void TTFrame::OnGitResult(const wxString& message) {
     if (statusBar_) {
         statusBar_->SetStatusText(message);
     }
+}
+
+// ---- macOS menu bar --------------------------------------------------------
+
+MacBarSnapshot TTFrame::MacBarState() {
+    MacBarSnapshot snapshot;
+    const std::time_t now = std::time(nullptr);
+    snapshot.dataPath = GetDataPath().string();
+    snapshot.running = state_.activeTask >= 0 &&
+                       state_.activeTask < (int)state_.tasks.size();
+    if (snapshot.running) {
+        const Task& task = state_.tasks[state_.activeTask];
+        snapshot.activeName = task.name;
+        snapshot.activeSince = task.wallStart;
+    }
+    double todayTotal = 0;
+    for (size_t i = 0; i < state_.tasks.size(); ++i) {
+        todayTotal += GetTaskTime(state_, (int)i, SummaryRange::Today, now);
+    }
+    snapshot.todayTotal = todayTotal;
+    return snapshot;
+}
+
+void* TTFrame::MacBarNativeWindow() {
+    return GetWXWindow();
+}
+
+void TTFrame::MacBarShowWindow() {
+    Show();
+    if (IsIconized()) Iconize(false);
+    Raise();
+}
+
+void TTFrame::MacBarHideWindow() {
+    Hide();
+}
+
+void TTFrame::MacBarReloadState() {
+    TTState fresh;
+    if (!LoadState(fresh)) return;  // unreadable: keep what we have
+    state_ = std::move(fresh);
+    RefreshTaskList();
+    RefreshTimes();
+    RefreshToggleButton();
+}
+
+void TTFrame::MacBarQuit() {
+    quitting_ = true;
+    Save();
+    if (wxTheApp) wxTheApp->ExitMainLoop();
 }

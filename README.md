@@ -6,9 +6,12 @@ A minimal time-tracking app, built on wxWidgets.
 
 - Add tasks, start/stop a timer with one click
 - Daily / weekly / two-week summary panel with previous-period navigation
-- State persisted as JSON in `$XDG_DATA_HOME/tt/state.json` (override via `$TT_DATA_DIR`)
+- State persisted as JSON in `$XDG_DATA_HOME/tt/state.json`
+  (`~/Library/Application Support/tt/state.json` on macOS; override via
+  `$TT_DATA_DIR`)
 - If the data dir is a git repo, every start/stop is committed and pushed
 - Lives in the top bar on [Omarchy](https://omarchy.org) (see below)
+- Lives in the menu bar on macOS (see below)
 - Shows the running task's time in the Xfce panel (see below)
 
 ## Dependencies
@@ -35,6 +38,12 @@ sudo pacman -S cmake gcc wxwidgets-gtk3
 sudo apt install cmake g++ libwxgtk3.2-dev
 ```
 
+### macOS
+
+```bash
+brew install cmake wxwidgets
+```
+
 If wxWidgets isn't installed, CMake will fetch and build it from source via
 `FetchContent` — no extra step required, just a longer first build.
 
@@ -49,11 +58,23 @@ sudo apt install libxfce4panel-2.0-dev libwnck-3-dev           # Debian / Ubuntu
 
 ## Build
 
+On Linux:
+
 ```bash
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ./tt
+```
+
+On macOS the app is a bundle, and the binary inside it is also the command
+line tool:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+open build/tt.app
+build/tt.app/Contents/MacOS/tt --help
 ```
 
 ## Usage
@@ -62,6 +83,39 @@ make -j$(nproc)
 - Click a task to select it
 - Click **Start** to begin tracking; click **Stop** (or **Space**) to stop
 - The summary panel shows totals for the chosen range; **<** / **>** cycle ranges
+
+## macOS
+
+tt lives in the menu bar. The icon shows the running task's time next to it
+(`1:02`); hover over it for the task and today's total. A click hides the
+window if it is on the current Space, and otherwise brings it to the current
+Space; launching tt starts it with the window. The window's close button hides it and leaves tt in the menu bar.
+Right-click the icon for **Open Window** and **Quit tt**; ⌘Q also quits while
+the window is focused.
+
+`tt --popup` toggles the window, for a keyboard shortcut, and `tt --window`
+shows it. Bind it with [skhd](https://github.com/koekeishiya/skhd) or
+Karabiner, for example:
+
+```bash
+# ~/.config/skhd/skhdrc
+ctrl + alt - t : /path/to/tt.app/Contents/MacOS/tt --popup
+```
+
+The app is a menu bar extra (`LSUIElement`), so it has no Dock icon.
+
+### Data and GitHub sync
+
+The data dir is `~/Library/Application Support/tt/` (or `$TT_DATA_DIR`). To
+connect it to a timetracking repo, clone the repo there:
+
+```bash
+mkdir -p "$HOME/Library/Application Support"
+gh repo clone <you>/timetracking "$HOME/Library/Application Support/tt"
+```
+
+tt commits and pushes after every start/stop; `tt sync` does the same on
+demand.
 
 ## Omarchy
 
@@ -148,13 +202,15 @@ tt sync            commit and push the data dir if it is a git repo
 
 ```
 src/
-  main.cpp        — entry: commands, Omarchy bar widget or window
+  main.cpp        — entry: commands, menu bar / Omarchy widget or window
   tt_frame.h/.cpp — main window: input, task list, toggle, summary panel
   data.h/.cpp     — Task / TimeSession model and JSON persistence
-  cli.h/.cpp      — JSON commands used by the bar widget
+  cli.h/.cpp      — JSON commands used by the bar widgets
   git_sync.h/.cpp — commit and push of the data dir
   omarchy.h/.cpp  — installs and opens the Omarchy bar widget
+  macbar.h/.mm    — the macOS menu bar item and show/hide of the window
 omarchy/          — the bar widget (QML), installed to share/tt-omarchy-plugin
+mac/              — the macOS app bundle's Info.plist
 xfce/             — the Xfce panel plugin and its icons
 ```
 
