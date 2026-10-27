@@ -1,6 +1,6 @@
 # tt — Time Tracker
 
-A minimal time-tracking app, built on wxWidgets.
+A minimal time-tracking app: wxWidgets on Linux, SwiftUI on macOS.
 
 ## Features
 
@@ -11,14 +11,16 @@ A minimal time-tracking app, built on wxWidgets.
   `$TT_DATA_DIR`)
 - If the data dir is a git repo, every start/stop is committed and pushed
 - Lives in the top bar on [Omarchy](https://omarchy.org) (see below)
-- Lives in the menu bar on macOS (see below)
+- A native SwiftUI app on macOS that lives in the menu bar (see below)
 - Shows the running task's time in the Xfce panel (see below)
 
 ## Dependencies
 
 - A C++20 compiler and CMake ≥ 3.28
-- wxWidgets ≥ 3.2 (system package, or auto-fetched and built from source)
+- wxWidgets ≥ 3.2 (system package, or auto-fetched and built from source;
+  not used on macOS)
 - nlohmann/json (auto-fetched)
+- On macOS: macOS 26 or later and Xcode or its command line tools (Swift)
 
 ### Fedora
 
@@ -41,7 +43,8 @@ sudo apt install cmake g++ libwxgtk3.2-dev
 ### macOS
 
 ```bash
-brew install cmake wxwidgets
+xcode-select --install
+brew install cmake
 ```
 
 If wxWidgets isn't installed, CMake will fetch and build it from source via
@@ -67,17 +70,20 @@ make -j$(nproc)
 ./tt
 ```
 
-On macOS the app is a bundle, and the binary inside it is also the command
-line tool:
+On macOS the build makes `tt.app`: the SwiftUI app, with the `tt` command
+line tool inside it:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 open build/tt.app
 build/tt.app/Contents/MacOS/tt --help
+cmake --install build --prefix /Applications   # optional
 ```
 
 ## Usage
+
+The wxWidgets window (Linux):
 
 - Type a task name and press **Enter** or click **+ Add**
 - Click a task to select it
@@ -86,12 +92,20 @@ build/tt.app/Contents/MacOS/tt --help
 
 ## macOS
 
+On macOS tt is a native SwiftUI app, in Liquid Glass. The top card shows the
+running task with a live stopwatch and a stop button (⌘.). Below it are the
+tasks, each with its time in the chosen range and a bar for its share of it:
+click a task to start it (stopping any other) and click it again to stop.
+**‹ ›** (⌘[ / ⌘]) step through Today, This Week, Two Weeks and the previous
+week and two weeks. **+** in the toolbar (⌘N) adds a task; the cloud next to
+it syncs with git now and shows the last sync on hover.
+
 tt lives in the menu bar. The icon shows the running task's time next to it
 (`1:02`); hover over it for the task and today's total. A click hides the
 window if it is on the current Space, and otherwise brings it to the current
-Space; launching tt starts it with the window. The window's close button hides it and leaves tt in the menu bar.
-Right-click the icon for **Open Window** and **Quit tt**; ⌘Q also quits while
-the window is focused.
+Space; launching tt starts it with the window. The window's close button
+hides it and leaves tt in the menu bar. Right-click the icon for **Open
+Window**, **Stop** and **Quit tt**; ⌘Q also quits while the window is focused.
 
 `tt --popup` toggles the window, for a keyboard shortcut, and `tt --window`
 shows it. Bind it with [skhd](https://github.com/koekeishiya/skhd) or
@@ -102,7 +116,10 @@ Karabiner, for example:
 ctrl + alt - t : /path/to/tt.app/Contents/MacOS/tt --popup
 ```
 
-The app is a menu bar extra (`LSUIElement`), so it has no Dock icon.
+The app is a menu bar extra (`LSUIElement`), so it has no Dock icon. Like the
+Omarchy widget and the Xfce plugin it runs `tt` for all its data, and it
+picks up changes made elsewhere (the command line, a `git pull`) within a
+couple of seconds.
 
 ### Data and GitHub sync
 
@@ -202,15 +219,15 @@ tt sync            commit and push the data dir if it is a git repo
 
 ```
 src/
-  main.cpp        — entry: commands, menu bar / Omarchy widget or window
+  main.cpp        — entry: commands, Omarchy widget or window (not macOS)
   tt_frame.h/.cpp — main window: input, task list, toggle, summary panel
   data.h/.cpp     — Task / TimeSession model and JSON persistence
   cli.h/.cpp      — JSON commands used by the bar widgets
   git_sync.h/.cpp — commit and push of the data dir
   omarchy.h/.cpp  — installs and opens the Omarchy bar widget
-  macbar.h/.mm    — the macOS menu bar item and show/hide of the window
+  mac_main.cpp    — entry on macOS: commands, or hand over to the app
 omarchy/          — the bar widget (QML), installed to share/tt-omarchy-plugin
-mac/              — the macOS app bundle's Info.plist
+mac/              — the macOS app: SwiftUI sources, Info.plist, icon tool
 xfce/             — the Xfce panel plugin and its icons
 ```
 

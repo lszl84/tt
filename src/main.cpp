@@ -2,7 +2,6 @@
 #include <cstdio>
 #include <cstring>
 #include "cli.h"
-#include "macbar.h"
 #include "omarchy.h"
 #include "tt_frame.h"
 
@@ -11,21 +10,10 @@ public:
     bool OnInit() override {
         SetAppName("tt");
         SetVendorName("tt");
-#if defined(__APPLE__)
-        // The window may close while tt keeps living in the menu bar.
-        SetExitOnFrameDelete(false);
-#endif
         auto* frame = new TTFrame();
         frame->Show(true);
         return true;
     }
-
-#if defined(__APPLE__)
-    int OnExit() override {
-        MacBarShutdown();
-        return wxApp::OnExit();
-    }
-#endif
 };
 
 #if defined(_WIN32)
@@ -39,9 +27,9 @@ wxIMPLEMENT_APP_NO_MAIN(TTApp);
 int main(int argc, char** argv) {
     if (int rc = RunCli(argc, argv); rc >= 0) return rc;
 
-    // --window opens the window even where tt lives in a bar; --popup shows or
-    // hides the bar widget's dropdown (on macOS it toggles the window). Drop
-    // both before wx sees the arguments.
+    // --window opens the window even where the Omarchy bar widget is
+    // available; --popup shows or hides the widget's dropdown (for a keyboard
+    // shortcut). Drop both before wx sees the arguments.
     bool forceWindow = false;
     bool togglePopup = false;
     for (int i = 1; i < argc; ++i) {
@@ -56,19 +44,6 @@ int main(int argc, char** argv) {
         --argc;
         --i;
     }
-
-#if defined(__APPLE__)
-    if (MacBarAvailable()) {
-        // A running copy gets the request, so a second `tt` doesn't create a
-        // second menu bar item. Without --popup, launching tt shows the
-        // window, the way the Dock would bring an app forward.
-        MacBarCommand command = (togglePopup && !forceWindow)
-                                    ? MacBarCommand::ToggleWindow
-                                    : MacBarCommand::ShowWindow;
-        if (MacBarNotifyRunning(command)) return 0;
-        return wxEntry(argc, argv);
-    }
-#endif
 
     if (!forceWindow && OmarchyShellAvailable()) {
         if (RunOmarchyLauncher(togglePopup)) return 0;

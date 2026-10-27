@@ -10,7 +10,6 @@
 #include <cstring>
 #include <sstream>
 #include <thread>
-#include <utility>
 
 namespace {
 
@@ -96,10 +95,6 @@ TTFrame::TTFrame()
     });
 
     UpdateStartupStatus();
-
-#if defined(__APPLE__)
-    MacBarInstall(this);
-#endif
 }
 
 TTFrame::~TTFrame() {
@@ -185,13 +180,8 @@ void TTFrame::AutoFitColumns(wxDataViewListCtrl* list) {
     if (!taskCol || !timeCol) return;
     int total = list->GetClientSize().GetWidth();
     if (total <= 0) return;
-#if defined(__APPLE__)
-    // The native table pads every column; its scrollbars overlay the rows.
-    total -= MacTableColumnSpacing(list->GetHandle());
-#else
     // Reserve space for the vertical scrollbar so no horizontal scrollbar appears.
     total -= wxSystemSettings::GetMetric(wxSYS_VSCROLL_X, list);
-#endif
 
     // A third of the width is the target, but the time can be "12h 34m 56s":
     // below ~120pt it gets clipped, so keep enough for the longest duration
@@ -218,9 +208,6 @@ void TTFrame::Save() {
     if (!SaveState(state_)) {
         std::fprintf(stderr, "Failed to save state\n");
     }
-#if defined(__APPLE__)
-    MacBarUpdate();
-#endif
 }
 
 void TTFrame::RefreshTaskList() {
@@ -355,14 +342,6 @@ void TTFrame::OnTick(wxTimerEvent&) {
 
 void TTFrame::OnClose(wxCloseEvent& evt) {
     Save();
-#if defined(__APPLE__)
-    // On macOS tt lives in the menu bar; closing the window leaves it there.
-    // Quit from the menu bar (or ⌘Q) ends the app.
-    if (!quitting_) {
-        Hide();
-        return;
-    }
-#endif
     evt.Skip();
 }
 
@@ -405,54 +384,4 @@ void TTFrame::OnGitResult(const wxString& message) {
     if (statusBar_) {
         statusBar_->SetStatusText(message);
     }
-}
-
-// ---- macOS menu bar --------------------------------------------------------
-
-MacBarSnapshot TTFrame::MacBarState() {
-    MacBarSnapshot snapshot;
-    const std::time_t now = std::time(nullptr);
-    snapshot.dataPath = GetDataPath().string();
-    snapshot.running = state_.activeTask >= 0 &&
-                       state_.activeTask < (int)state_.tasks.size();
-    if (snapshot.running) {
-        const Task& task = state_.tasks[state_.activeTask];
-        snapshot.activeName = task.name;
-        snapshot.activeSince = task.wallStart;
-    }
-    double todayTotal = 0;
-    for (size_t i = 0; i < state_.tasks.size(); ++i) {
-        todayTotal += GetTaskTime(state_, (int)i, SummaryRange::Today, now);
-    }
-    snapshot.todayTotal = todayTotal;
-    return snapshot;
-}
-
-void* TTFrame::MacBarNativeWindow() {
-    return GetWXWindow();
-}
-
-void TTFrame::MacBarShowWindow() {
-    Show();
-    if (IsIconized()) Iconize(false);
-    Raise();
-}
-
-void TTFrame::MacBarHideWindow() {
-    Hide();
-}
-
-void TTFrame::MacBarReloadState() {
-    TTState fresh;
-    if (!LoadState(fresh)) return;  // unreadable: keep what we have
-    state_ = std::move(fresh);
-    RefreshTaskList();
-    RefreshTimes();
-    RefreshToggleButton();
-}
-
-void TTFrame::MacBarQuit() {
-    quitting_ = true;
-    Save();
-    if (wxTheApp) wxTheApp->ExitMainLoop();
 }
