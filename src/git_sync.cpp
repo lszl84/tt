@@ -10,10 +10,13 @@ bool IsGitRepo(const std::filesystem::path& dir) {
 }
 
 GitSyncResult RunGitSync(const std::filesystem::path& dir) {
-    // cd to the data dir, commit and push
+    // cd to the data dir, commit if anything changed, and push. `tt sync` is
+    // also called with no changes (after an add, or from a bar widget), and
+    // that should not be an error.
     std::string cmd = "cd \"" + dir.string() + "\" && "
                       "git add -A && "
-                      "git commit -m \"auto: updates\" && "
+                      "(git diff --cached --quiet || "
+                      "git commit -m \"auto: updates\") && "
                       "git push 2>&1";
 
     GitSyncResult result;
