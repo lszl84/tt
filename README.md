@@ -102,8 +102,8 @@ it syncs with git now and shows the last sync on hover.
 
 tt lives in the menu bar. The icon shows the running task's time next to it
 (`1:02`); hover over it for the task and today's total. A click hides the
-window if it is on the current Space, and otherwise brings it to the current
-Space; launching tt starts it with the window. The window's close button
+window if it is in front of the other windows, and otherwise brings it to the
+front on the current Space; launching tt starts it with the window. The window's close button
 hides it and leaves tt in the menu bar. Right-click the icon for **Open
 Window**, **Stop** and **Quit tt**; ⌘Q also quits while the window is focused.
 

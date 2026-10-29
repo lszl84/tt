@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 
 // tt lives in the menu bar: a timer icon with the running task's time. A
-// click hides the window if it is on the current Space and otherwise brings
-// it there; a right-click offers Open Window, Stop and Quit. Closing the
-// window leaves tt in the menu bar, and it has no Dock icon.
+// click hides the window if it is the one in use and otherwise brings it to
+// the front on the current Space; a right-click offers Open Window, Stop and
+// Quit. Closing the window leaves tt in the menu bar, and it has no Dock icon.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // Shared with src/mac_main.cpp: `tt`, `tt --window` and `tt --popup`
@@ -84,17 +84,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.orderOut(nil)
         }
         if window.isMiniaturized { window.deminiaturize(nil) }
-        NSApp.activate()
+        // Plain activate() is only a request since macOS 14, and it is
+        // refused while another app is active: the window came up behind that
+        // app's windows, unfocused. The older call still takes focus for a
+        // menu bar app. Raising the window above normal windows and back puts
+        // it in front even if that ever stops working.
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.level = .floating
+        window.orderFrontRegardless()
+        window.level = .normal
     }
 
-    // Hide the window if it is on the current Space; otherwise bring it here.
+    // Hide the window if it is in front of every other window on this
+    // Space. Otherwise (hidden, behind other windows, on another Space)
+    // bring it to the front here.
     private func toggleWindow() {
-        if window.isVisible && !window.isMiniaturized && window.isOnActiveSpace {
+        let inFront = window.isVisible && !window.isMiniaturized && window.isOnActiveSpace
+            && isFrontmostWindow()
+        if inFront {
             window.orderOut(nil)
         } else {
             showWindow()
         }
+    }
+
+    // Whether the window is the frontmost normal window on screen, of any
+    // app. tt need not be the active app for that (see showWindow).
+    private func isFrontmostWindow() -> Bool {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
+                as? [[String: Any]] else { return false }
+        let front = windows.first { ($0[kCGWindowLayer as String] as? Int) == 0 }
+        return (front?[kCGWindowNumber as String] as? Int) == window.windowNumber
     }
 
     // An accessory app shows no menu bar, but its menus still carry the
