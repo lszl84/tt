@@ -96,27 +96,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.level = .normal
     }
 
-    // Hide the window if it is in front of every other window on this
-    // Space. Otherwise (hidden, behind other windows, on another Space)
-    // bring it to the front here.
+    // Hide the window if any of it can be seen on this Space; otherwise
+    // (hidden, covered by other windows, on another Space) bring it to the
+    // front here. Neither focus nor the window order works for this: a click
+    // on the menu bar item deactivates tt, and the order puts windows of
+    // other apps above it.
     private func toggleWindow() {
-        let inFront = window.isVisible && !window.isMiniaturized && window.isOnActiveSpace
-            && isFrontmostWindow()
-        if inFront {
+        let seen = window.isVisible && !window.isMiniaturized && window.isOnActiveSpace
+            && window.occlusionState.contains(.visible)
+        if seen {
             window.orderOut(nil)
         } else {
             showWindow()
         }
-    }
-
-    // Whether the window is the frontmost normal window on screen, of any
-    // app. tt need not be the active app for that (see showWindow).
-    private func isFrontmostWindow() -> Bool {
-        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
-                as? [[String: Any]] else { return false }
-        let front = windows.first { ($0[kCGWindowLayer as String] as? Int) == 0 }
-        return (front?[kCGWindowNumber as String] as? Int) == window.windowNumber
     }
 
     // An accessory app shows no menu bar, but its menus still carry the
